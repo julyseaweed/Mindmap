@@ -1,0 +1,20 @@
+#pdf-export { display: none; }
+
+@media print {
+  html:has(body > #pdf-export), body:has(> #pdf-export) { width: auto !important; height: auto !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; background: #ffffff !important; color-scheme: light !important; }
+  body:has(> #pdf-export) > :not(#pdf-export) { display: none !important; }
+  #pdf-export { display: block !important; position: relative !important; margin: 0 !important; padding: 0 !important; overflow: hidden !important; background: #ffffff !important; color: #111111 !important; color-scheme: light !important; --paper: #ffffff; --surface: #ffffff; --ink: #111111; --node-ink: #111111; break-inside: avoid; }
+  #pdf-export, #pdf-export * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+  #pdf-export .pdf-world { position: absolute !important; transform-origin: 0 0 !important; margin: 0 !important; padding: 0 !important; opacity: 1 !important; }
+  #pdf-export .connections { position: absolute !important; left: 0 !important; top: 0 !important; overflow: visible !important; }
+  #pdf-export .connections [stroke]:not([stroke='none']) { stroke: #111111 !important; }
+  #pdf-export .mind-node { position: absolute !important; display: flex !important; align-items: center !important; justify-content: center !important; padding: var(--node-padding-y) var(--node-padding-x) !important; border: var(--node-border-width) solid #111111 !important; border-radius: 3px !important; background: #ffffff !important; color: #111111 !important; font-family: var(--pdf-node-font, var(--font-node)) !important; font-size: var(--node-font-size) !important; font-weight: 400 !important; font-style: normal !important; line-height: var(--node-line-height) !important; opacity: 1 !important; box-shadow: none !important; outline: none !important; }
+  #pdf-export .mind-node::before, #pdf-export .mind-node::after { display: none !important; }
+  #pdf-export .node-text { display: block !important; text-align: center !important; white-space: pre !important; color: #111111 !important; }
+  #pdf-export .node-text > span { display: block !important; min-height: var(--node-line-height) !important; }
+  #pdf-export .pdf-textarea-fallback { width: 100% !important; white-space: pre-wrap !important; overflow-wrap: anywhere !important; }
+  #pdf-export button { display: none !important; }
+  #pdf-export .node-image { outline: none !important; box-shadow: none !important; }
+  #pdf-export .node-image img { filter: none !important; opacity: 1 !important; }
+  #pdf-export .node-resize-handle, #pdf-export .node-image-resizer { display: none !important; }
+}

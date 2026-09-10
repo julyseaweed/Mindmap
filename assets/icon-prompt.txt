@@ -1,0 +1,9 @@
+Built-in image_gen tool, background-extraction edit.
+
+Initial prompt:
+Use case: background-extraction. Asset type: Windows desktop application icon, transparent PNG sticker. Image 1 is the EDIT TARGET: preserve the supplied hand-painted cartoon girl holding a red magnifying glass over her large eye, including original pose, black hair, skin color, red magnifying glass, white shirt, hand and original brush texture. Image 2 is ONLY a reference for the white sticker outline and transparent background; do not borrow that character or redraw target in its style. Remove only the entire blue and green background from image 1. Add a clean solid white outer sticker outline around the entire cutout silhouette, about 12px at 512px icon size, matching the outline treatment of image 2. Compose the extracted original subject centered and large on a square transparent canvas, with a small clear margin on all sides. Preserve original cropped right and bottom edges as they exist rather than inventing missing anatomy. Preserve the exact artwork as faithfully as possible. Actual alpha transparency outside the white outline, no checkerboard pattern painted in, no background, no shadow, no text, no square tile.
+
+Final corrective prompt:
+Edit this sticker image. The current file is RGB with a painted gray-white checkerboard. Remove the entire checkerboard background and output a REAL RGBA PNG with a transparent alpha channel outside the sticker. This is an app icon, so actual transparency is mandatory; checkerboard must NOT be painted as pixels. Keep the existing artwork and the solid white outer sticker border exactly unchanged. No shadow, no added background, no new objects. Only background extraction.
+
+Final alpha verified: RGBA, alpha extrema (0, 255). PNG artwork copied unchanged; ICO stores 16, 24, 32, 48, 64, 128 and 256 pixel sizes.

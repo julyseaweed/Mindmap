@@ -1,0 +1,5 @@
+.resizable-sidebar { position: relative; flex: 0 0 auto; align-self: stretch; min-height: 0; }
+.resizable-sidebar > aside { width: 100%; height: 100%; }
+.sidebar-resizer { position: absolute; z-index: 8; top: 0; right: -3px; bottom: 0; width: 7px; cursor: col-resize; touch-action: none; user-select: none; outline: none; }
+.sidebar-resizer::after { content: ''; position: absolute; top: 0; bottom: 0; left: 3px; width: 1px; background: var(--ink); opacity: 0; pointer-events: none; }
+.sidebar-resizer:hover::after, .sidebar-resizer:focus-visible::after, .resizable-sidebar.is-resizing > .sidebar-resizer::after { opacity: 1; }

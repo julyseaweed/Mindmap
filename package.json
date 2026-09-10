@@ -1,0 +1,47 @@
+{
+  "name": "mindmap",
+  "productName": "Mindmap",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Mindmap — 本地思维导图与 Mermaid 导出。",
+  "author": "julyseaweed",
+  "license": "UNLICENSED",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build",
+    "start": "electron .",
+    "test": "node --test tests/core.test.mjs tests/node-drag.test.mjs tests/storage.test.mjs",
+    "test:desktop": "node tests/desktop.mjs",
+    "test:library": "node tests/library.mjs",
+    "test:library-drag": "node tests/library-drag.mjs",
+    "test:delete": "node tests/delete.mjs",
+    "test:sidebar-resize": "node tests/sidebar-resize.mjs",
+    "test:theme": "node tests/theme.mjs",
+    "test:pdf": "node tests/pdf-export.mjs",
+    "test:media": "node tests/node-media.mjs",
+    "test:clipboard": "node tests/node-clipboard.mjs",
+    "test:node-drag": "node tests/node-drag.mjs",
+    "test:empty-delete": "node tests/empty-node-delete.mjs",
+    "test:single-delete": "node tests/single-node-delete.mjs",
+    "test:interactions": "node tests/interaction-boundaries.mjs",
+    "test:save-copy": "node tests/save-copy.mjs",
+    "package": "npm run build && node scripts/package.mjs"
+  },
+  "dependencies": {
+    "lucide-react": "1.42.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@electron/packager": "20.3.0",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.7",
+    "electron": "44.2.0",
+    "mermaid": "11.17.2",
+    "playwright": "1.63.0",
+    "typescript": "7.0.2",
+    "vite": "8.2.2"
+  }
+}

@@ -1,0 +1,23 @@
+node_modules/
+dist/
+release/
+test-results/
+*.log
+
+# Personal maps and application state
+local-data/
+.mindmap/
+导图/
+*.mindmap
+
+# Local credentials and machine settings
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.npmrc
+.DS_Store
+Thumbs.db
+__pycache__/
+*.pyc
