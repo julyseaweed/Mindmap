@@ -67,9 +67,9 @@ kbd { font-family: var(--font-mono); color: var(--muted); font-size: 10px; font-
 .file-button:hover, .file-button.active, .icon-button:hover:not(:disabled), .icon-button.active { background: var(--hover); }
 .divider { display: block; width: 1px; height: 20px; background: var(--line); flex-shrink: 0; }
 .document-heading { min-width: 0; display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
-.document-title { font-weight: 600; font-size: 14px; letter-spacing: .1px; max-width: min(40vw, 450px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0; text-align: left; }
+.document-title { font-weight: 400; font-size: 14px; letter-spacing: .1px; max-width: min(40vw, 450px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0; text-align: left; }
 .document-title:hover { color: var(--ink-hover); }
-.title-input { padding: 0; height: 22px; width: min(36vw, 340px); font-weight: 600; border: none; border-bottom: 1px solid var(--node-ink); background: var(--surface); outline: none; }
+.title-input { padding: 0; height: 22px; width: min(36vw, 340px); font-weight: 400; border: none; border-bottom: 1px solid var(--node-ink); background: var(--surface); outline: none; }
 .save-error { font-size: 10px; padding: 0; color: var(--error); }
 .toolbar-actions { gap: 9px; flex-shrink: 0; }
 .history-buttons { gap: 1px; }
