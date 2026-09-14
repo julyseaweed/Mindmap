@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
-import { ArrowDown, ArrowRight, ArrowUp, ChevronDown, ChevronRight, Copy, Scissors, ClipboardPaste, FilePlus2, FolderOpen, ListTree, Maximize, Minus, MoreHorizontal, PanelLeft, Plus, Redo2, Save, Search, Undo2, X, Download, Folder, CornerDownRight, Trash2, ChevronsUpDown, Keyboard, ExternalLink, Moon, Sun } from 'lucide-react';
+import { ArrowDown, ArrowRight, ArrowUp, ChevronDown, ChevronRight, Copy, Scissors, ClipboardPaste, FilePlus2, FolderOpen, ListTree, Maximize, Minus, MoreHorizontal, PanelLeft, Plus, Redo2, Save, Search, Undo2, X, Download, Folder, CornerDownRight, Trash2, ChevronsUpDown, Keyboard, Moon, Sun } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import type { Box } from './core.mjs';
@@ -1105,7 +1105,7 @@ export default function App() {
       <div className="menu-separator"/>
       <button disabled={!doc} onClick={() => void exportFile()}><Download size={16}/><span>导出为 Markdown</span></button>
       <button disabled={!doc} onClick={() => void exportPdf()}><Download size={16}/><span>导出为 PDF</span></button>
-      <button onClick={() => { setMenu(false); void api?.reveal(); }}><Folder size={16}/><span>在文件夹中显示</span><ExternalLink size={12}/></button>
+      <button onClick={() => { setMenu(false); void api?.reveal(); }}><Folder size={16}/><span>在文件夹中显示</span></button>
       <button onClick={() => { setMenu(false); finishEdit(); setHelp(true); }}><Keyboard size={16}/><span>快捷键</span></button>
     </div>}
     {context && doc && <div ref={contextElement} className="popover context-menu" style={{ left: context.x, top: context.y }}>
