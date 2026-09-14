@@ -126,7 +126,9 @@ const newMap = async (method, text, expectedFolder = maps) => {
   await page.locator('.app:not(.busy)').waitFor();
   const editor = page.getByRole('textbox', { name: '编辑节点', exact: true });
   await editor.waitFor();
-  await editor.fill(text);
+  assert.equal(await editor.inputValue(), '', `${method}新建导图的中心节点必须为空`);
+  await eventually(async () => editor.evaluate(element => element === document.activeElement), `${method}新建导图必须自动聚焦中心节点`);
+  await page.keyboard.insertText(text);
   await page.keyboard.press('Control+Enter');
   await waitSaved();
   await entry(text).waitFor();

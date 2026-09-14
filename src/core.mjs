@@ -20,7 +20,7 @@ export const uid = () => 'n' + crypto.randomUUID().replaceAll('-', '');
 
 export function createDocument(title = '未命名导图') {
   return { format: FORMAT, version: 1, id: uid(), title, rootId: 'root', nodes: {
-    root: { id: 'root', text: '中心主题', children: [], collapsed: false },
+    root: { id: 'root', text: '', children: [], collapsed: false },
   } };
 }
 
@@ -193,7 +193,7 @@ export function pasteBranch(doc, targetId, branch) {
   catch { throw capacityError(); }
 }
 
-export function addNode(doc, selectedId, kind = 'child', text = '新主题') {
+export function addNode(doc, selectedId, kind = 'child', text = '') {
   const next = clone(doc);
   const parentId = kind === 'sibling' ? parentOf(doc, selectedId) ?? selectedId : selectedId;
   const parent = next.nodes[parentId];

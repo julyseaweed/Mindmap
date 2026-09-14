@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { welcomeDocument } from '../src/core.mjs';
+import { createDocument, welcomeDocument } from '../src/core.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const results = path.join(root, 'test-results');
@@ -30,16 +30,18 @@ const waitSave = async page => {
 };
 const expectTitle = (page, title) => page.waitForFunction(expected => document.querySelector('.document-title')?.textContent === expected, title);
 const selectedId = page => page.locator('.mind-node.selected').getAttribute('data-node-id');
+const expectBlankEditor = async page => {
+  await page.waitForFunction(() => {
+    const editor = document.querySelector('textarea[aria-label="编辑节点"]');
+    return editor && document.activeElement === editor && editor.value === '' && !editor.placeholder && editor.selectionStart === 0 && editor.selectionEnd === 0;
+  });
+};
 try {
   let page = await launch();
   assert.equal(await page.locator('.mind-node').count(), 1);
   const initialEditor = page.getByRole('textbox', { name: '编辑节点' });
   await initialEditor.waitFor();
-  await page.waitForFunction(() => {
-    const editor = document.querySelector('textarea[aria-label="编辑节点"]');
-    return editor && document.activeElement === editor && editor.selectionStart === 0 && editor.selectionEnd === editor.value.length;
-  });
-  assert.equal(await initialEditor.inputValue(), '中心主题');
+  await expectBlankEditor(page);
   assert.equal(await page.locator('.canvas-label, .empty-hint, .canvas-meta, .statusbar, .titlebar-caption').count(), 0);
   assert.equal(await page.getByText('已保存到本地', { exact: true }).count(), 0);
   assert.equal(await page.locator('.brand > span').innerText(), "Mindmap");
@@ -47,7 +49,7 @@ try {
   assert.equal(await page.locator('.brand strong').count(), 0);
   await page.screenshot({ path: path.join(results, '01-clean-start.png') });
 
-  // The selected placeholder can be replaced immediately, without a preliminary click.
+  // The empty editor accepts typing immediately, without a preliminary click.
   await page.keyboard.insertText('直接开始记录');
   await expectTitle(page, '直接开始记录');
   assert.equal(await initialEditor.isVisible(), true);
@@ -72,11 +74,11 @@ try {
   // The original edit is one undo step containing the node and its automatic title.
   await page.keyboard.press('Control+z');
   await expectTitle(page, '未命名导图');
-  assert.equal(await page.locator('[data-node-id="root"] .node-text').innerText(), '中心主题');
+  assert.equal((await page.locator('[data-node-id="root"] .node-text').innerText()).trim(), '');
   await waitSave(page);
   savedTitleDoc = await readCurrent();
   assert.equal(savedTitleDoc.title, '未命名导图');
-  assert.equal(savedTitleDoc.nodes.root.text, '中心主题');
+  assert.equal(savedTitleDoc.nodes.root.text, '');
   await page.keyboard.press('Control+Shift+z');
   await expectTitle(page, '直接开始记录');
   assert.equal(await page.locator('[data-node-id="root"] .node-text').innerText(), '直接开始记录');
@@ -115,6 +117,19 @@ try {
   assert.deepEqual(migratedDoc.nodes, legacyDoc.nodes);
   assert.equal((await readCurrent()).title, migratedDoc.title);
 
+  // A saved image-only root is content, so reopening it must not start text editing.
+  const picturePath = path.join(home, '导图', '图片导图.mindmap');
+  const pictureDoc = createDocument();
+  pictureDoc.nodes.root.images = [{ id: 'picture', width: 64, height: 64, naturalWidth: 1, naturalHeight: 1, dataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aVFcAAAAASUVORK5CYII=' }];
+  const pictureBytes = JSON.stringify(pictureDoc, null, 2);
+  await fs.writeFile(picturePath, pictureBytes, 'utf8');
+  await app.evaluate(({ dialog }, file) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [file] }); }, picturePath);
+  await page.keyboard.press('Control+o');
+  await page.locator('[data-image-id="picture"]').waitFor();
+  assert.equal(await page.locator('.node-editor').count(), 0);
+  await waitSave(page);
+  assert.equal(await fs.readFile(picturePath, 'utf8'), pictureBytes);
+
   // Complex interaction checks use an explicit test fixture, never startup instructions.
   const fixturePath = path.join(home, '导图', '交互测试.mindmap');
   await fs.writeFile(fixturePath, JSON.stringify(welcomeDocument(), null, 2), 'utf8');
@@ -125,7 +140,8 @@ try {
   assert.equal(await page.locator('.mind-node').count(), 9);
   await page.locator('[data-node-id="root"]').click();
   await page.keyboard.press('Tab');
-  await page.getByRole('textbox', { name: '编辑节点' }).fill('边看边记录');
+  await expectBlankEditor(page);
+  await page.keyboard.insertText('边看边记录');
   const branch = await selectedId(page);
   await page.keyboard.press('Tab');
   await page.getByRole('textbox', { name: '编辑节点' }).fill('中文 "双引号" & #标签 <script> `反引号`');
@@ -133,7 +149,8 @@ try {
   await page.keyboard.insertText('第二行');
   const child = await selectedId(page);
   await page.keyboard.press('Enter');
-  await page.getByRole('textbox', { name: '编辑节点' }).fill('下一个观点');
+  await expectBlankEditor(page);
+  await page.keyboard.insertText('下一个观点');
   const sibling = await selectedId(page);
   await page.keyboard.press('Control+Enter');
   await waitSave(page);

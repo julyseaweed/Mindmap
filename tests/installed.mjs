@@ -34,7 +34,7 @@ try {
   const state = JSON.parse(await fs.readFile(path.join(home, '.mindmap', 'workspace.json'), 'utf8'));
   assert.equal(path.dirname(state.current), path.join(home, '导图'));
   const doc = JSON.parse(await fs.readFile(state.current, 'utf8'));
-  assert.equal(doc.nodes.root.text, '中心主题');
+  assert.equal(doc.nodes.root.text, '');
   assert.equal(Object.keys(doc.nodes).length, 1);
   assert.equal(await page.locator('.mind-node').count(), 1);
   const editor = page.getByRole('textbox', { name: '编辑节点' });
@@ -43,7 +43,7 @@ try {
     const editor = document.querySelector('textarea[aria-label="编辑节点"]');
     return editor && document.activeElement === editor && editor.selectionStart === 0 && editor.selectionEnd === editor.value.length;
   });
-  assert.equal(await editor.inputValue(), '中心主题');
+  assert.equal(await editor.inputValue(), '');
   assert.equal(await page.locator('.canvas-label, .empty-hint, .canvas-meta, .statusbar, .titlebar-caption').count(), 0);
   assert.equal(await page.getByText('已保存到本地', { exact: true }).count(), 0);
   const brand = page.locator('.brand > span');

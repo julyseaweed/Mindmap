@@ -166,7 +166,7 @@ try {
   assert.deepEqual(await mapFiles(), []);
   let draft = await session();
   assert.equal(Object.keys(draft.doc.nodes).length, 1);
-  assert.equal(draft.doc.nodes[draft.doc.rootId].text, '中心主题');
+  assert.equal(draft.doc.nodes[draft.doc.rootId].text, '');
   await deleteRow(namedRow('第一组'));
   assert.deepEqual(await fs.readdir(maps), []);
   await library().getByText('暂无导图', { exact: true }).waitFor();
@@ -184,7 +184,7 @@ try {
   await launch();
   assert.deepEqual(await fs.readdir(maps), []);
   draft = await session();
-  assert.equal(draft.doc.nodes[draft.doc.rootId].text, '中心主题');
+  assert.equal(draft.doc.nodes[draft.doc.rootId].text, '');
   await library().getByText('暂无导图', { exact: true }).waitFor();
   const editor = page.getByRole('textbox', { name: '编辑节点', exact: true });
   await editor.waitFor();

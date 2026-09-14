@@ -527,7 +527,7 @@ export default function App() {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     sessionRef.current = next;
     docRef.current = next.doc;
-    const isBlank = next.doc.title === '未命名导图' && Object.keys(next.doc.nodes).length === 1 && next.doc.nodes[next.doc.rootId].text === '中心主题';
+    const isBlank = next.doc.title === '未命名导图' && Object.keys(next.doc.nodes).length === 1 && next.doc.nodes[next.doc.rootId].text === '' && !next.doc.nodes[next.doc.rootId].images?.length;
     const editing = isBlank ? { id: next.doc.rootId, base: clone(next.doc), fresh: false } : null;
     editRef.current = editing;
     setSession(next);

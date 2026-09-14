@@ -129,7 +129,7 @@ test('malformed workspace metadata does not prevent opening the local app', asyn
     const restarted = new LocalStore(dir);
     const session = await restarted.boot();
     assert.ok(session.token);
-    assert.equal(session.doc.nodes[session.doc.rootId].text, '中心主题');
+    assert.equal(session.doc.nodes[session.doc.rootId].text, '');
     assert.ok(session.recent.every(item => typeof item.path === 'string' && path.isAbsolute(item.path)));
   }
 });
