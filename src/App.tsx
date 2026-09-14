@@ -527,12 +527,14 @@ export default function App() {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     sessionRef.current = next;
     docRef.current = next.doc;
-    const isBlank = next.doc.title === '未命名导图' && Object.keys(next.doc.nodes).length === 1 && next.doc.nodes[next.doc.rootId].text === '' && !next.doc.nodes[next.doc.rootId].images?.length;
-    const editing = isBlank ? { id: next.doc.rootId, base: clone(next.doc), fresh: false } : null;
+    const nextDoc = next.doc;
+    const root = nextDoc?.nodes[nextDoc.rootId];
+    const editing = nextDoc && nextDoc.title === '未命名导图' && Object.keys(nextDoc.nodes).length === 1 && root?.text === '' && !root.images?.length
+      ? { id: nextDoc.rootId, base: clone(nextDoc), fresh: false } : null;
     editRef.current = editing;
     setSession(next);
     selectLibraryPath(next.path);
-    selectDraftOnSave.current = !next.path;
+    selectDraftOnSave.current = !!nextDoc && !next.path;
     setDoc(next.doc);
     setEdit(editing);
     setSaveState('saved');
@@ -546,18 +548,18 @@ export default function App() {
     revision.current = 0;
     savedRevision.current = 0;
     anchor.current = null;
-    needsFit.current = true;
-    select(next.doc.rootId, false);
-    const rootText = next.doc.nodes[next.doc.rootId].text;
-    if (next.doc.title === '未命名导图' && rootText !== '中心主题') {
-      const title = titleFromText(rootText);
-      if (title !== next.doc.title) markChanged({ ...next.doc, title });
+    needsFit.current = !!nextDoc;
+    pan.current = null; setPanning(false);
+    select(nextDoc?.rootId ?? '', false);
+    if (nextDoc && root && nextDoc.title === '未命名导图' && root.text !== '中心主题') {
+      const title = titleFromText(root.text);
+      if (title !== nextDoc.title) markChanged({ ...nextDoc, title });
     }
     if (next.notice) showError(next.notice);
   }, [showError, clearError, select, markChanged, selectLibraryPath, cancelNodeDrag]);
 
   const fileAction = async (action: 'new' | 'open' | 'save-as', path?: string) => {
-    if (!api || !docRef.current || !sessionRef.current || busyRef.current) return;
+    if (!api || !sessionRef.current || busyRef.current || (action === 'save-as' && !docRef.current)) return;
     finishEdit();
     if (action === 'save-as' && saveTimer.current) clearTimeout(saveTimer.current);
     busyRef.current = true;
@@ -567,7 +569,7 @@ export default function App() {
     try {
       await pasteQueue.current;
       if (action === 'save-as') {
-        await api.saveAs(docRef.current, sessionRef.current.token);
+        await api.saveAs(docRef.current!, sessionRef.current.token);
       } else {
         await flush();
         savingSource = false;
@@ -600,17 +602,18 @@ export default function App() {
       const result = await action();
       ++libraryRequest.current;
       if (result.session) {
-        if (options.reloadSession || result.session.doc.id !== docRef.current?.id || result.session.doc.title !== docRef.current?.title) loadSession(result.session);
+        if (options.reloadSession || result.session.doc?.id !== docRef.current?.id || result.session.doc?.title !== docRef.current?.title) loadSession(result.session);
         else { sessionRef.current = result.session; setSession(result.session); }
       }
       const { relocation } = options;
+      let candidate = previousSelection;
       if (relocation) {
         const sourceKey = libraryPathKey(relocation.source);
         const selectedKey = libraryPathKey(previousSelection);
         const relocated = selectedKey === sourceKey || selectedKey.startsWith(sourceKey + '/');
-        const candidate = relocated ? relocation.destination + previousSelection.slice(relocation.source.length) : previousSelection;
-        selectLibraryPath(findLibraryEntry(result.library.entries, candidate)?.path ?? '');
+        if (relocated) candidate = relocation.destination + previousSelection.slice(relocation.source.length);
       }
+      selectLibraryPath(findLibraryEntry(result.library.entries, candidate)?.path ?? '');
       acceptLibrary(result.library);
       if (result.notice) showError(result.notice);
       return result.library;
@@ -726,7 +729,7 @@ export default function App() {
     });
     observer.observe(canvas.current);
     return () => observer.disconnect();
-  }, [!!doc]);
+  }, [!!session]);
 
   useLayoutEffect(() => {
     if (!layout) return;
@@ -763,14 +766,14 @@ export default function App() {
     const wheel = (event: WheelEvent) => {
       if ((event.target as HTMLElement).closest('.search-panel, .popover, .outline-panel')) return;
       event.preventDefault();
-      if (drag.current?.active || mediaGesture.current) return;
+      if (!docRef.current || drag.current?.active || mediaGesture.current) return;
       const rect = element.getBoundingClientRect();
       if (event.ctrlKey || event.metaKey) zoom(Math.exp(-event.deltaY * 0.005), { x: event.clientX - rect.left, y: event.clientY - rect.top });
       else updateView(v => ({ ...v, x: v.x - (event.shiftKey ? event.deltaY : event.deltaX), y: v.y - (event.shiftKey ? 0 : event.deltaY) }));
     };
     element.addEventListener('wheel', wheel, { passive: false });
     return () => element.removeEventListener('wheel', wheel);
-  }, [!!doc, updateView]);
+  }, [!!session, updateView]);
 
   useEffect(() => {
     const close = api?.onClose(() => {
@@ -836,11 +839,11 @@ export default function App() {
       if (selectedImage && key === 'escape') { setSelectedImage(null); return; }
       if (help) { if (key === 'escape') setHelp(false); return; }
       if (key === 'escape') { setMenu(false); setContext(null); setSearchOpen(false); return; }
+      if (!docRef.current) return;
       if (modifier && key === 'f') { event.preventDefault(); setSearchOpen(true); return; }
       if (modifier && key === '0') { event.preventDefault(); fit(); return; }
       if (modifier && (key === '=' || key === '+' || key === '-')) { event.preventDefault(); zoom(key === '-' ? 0.85 : 1.18); return; }
       if (modifier && (key === 'z' || key === 'y')) { event.preventDefault(); undo(key === 'y' || event.shiftKey); return; }
-      if (!docRef.current) return;
       if (key === 'tab') { event.preventDefault(); add('child'); return; }
       if (key === 'enter') { event.preventDefault(); add('sibling'); return; }
       if (key === 'f2') { event.preventDefault(); startEdit(); return; }
@@ -936,9 +939,9 @@ export default function App() {
   });
 
   if (fatal) return <main className="fatal"><Logo/><h1>暂时无法打开应用</h1><p>{fatal}</p><button className="primary-button" onClick={() => location.reload()}>重新打开</button></main>;
-  if (!doc || !layout || !session) return <main className="loading"><Logo/><span>Mindmap</span></main>;
-  const currentNode = doc.nodes[selected];
-  const currentBox = layout.boxes[selected];
+  if (!session) return <main className="loading"><Logo/><span>Mindmap</span></main>;
+  const currentNode = doc?.nodes[selected];
+  const currentBox = layout?.boxes[selected];
 
   return <div className={`app ${busy ? 'busy' : ''}`} data-save-state={saveState} onKeyDownCapture={event => {
     if (busyRef.current || mediaGesture.current || drag.current?.active) { event.preventDefault(); event.stopPropagation(); }
@@ -954,19 +957,19 @@ export default function App() {
       <div className="file-section">
         <IconButton icon={PanelLeft} label="导图库" active={libraryOpen} onClick={() => { finishEdit(); setLibraryOpen(!libraryOpen); if (!libraryOpen) setOutline(false); }}/>
         <button className={`file-button ${menu ? 'active' : ''}`} aria-label="文件菜单" title="文件菜单" onClick={() => { finishEdit(); setMenu(!menu); setContext(null); }}><FolderOpen size={18} strokeWidth={1.5}/><ChevronDown size={12}/></button>
-        <span className="divider"/>
+        {doc && <><span className="divider"/>
         <div className="document-heading">
           {renaming ? <input ref={renameRef} className="title-input" aria-label="导图名称" maxLength={200} value={name} onChange={e => setName(e.target.value)} onBlur={commitName} onKeyDown={e => { if (e.nativeEvent.isComposing) return; if (e.key === 'Enter') commitName(); if (e.key === 'Escape') setRenaming(false); }}/>
             : <button className="document-title" title="点击修改导图名称" onClick={() => { finishEdit(); setName(doc.title); setRenaming(true); }}>{doc.title}</button>}
           {saveState === 'error' && <button className="save-error" role="alert" onClick={() => void flush().catch(() => {})}>保存失败 · 点击重试</button>}
-        </div>
+        </div></>}
       </div>
       <div className="toolbar-actions">
         <div className="history-buttons"><IconButton icon={Undo2} label="撤销 (Ctrl + Z)" disabled={!historyCount.past && !edit} onClick={() => undo()}/><IconButton icon={Redo2} label="重做 (Ctrl + Shift + Z)" disabled={!historyCount.future} onClick={() => undo(true)}/></div>
         <span className="divider optional"/>
-        <IconButton icon={ListTree} label="显示大纲" active={outline} onClick={() => { finishEdit(); setOutline(!outline); if (!outline) setLibraryOpen(false); }}/>
-        <IconButton icon={Search} label="查找节点 (Ctrl + F)" active={searchOpen} onClick={() => { finishEdit(); setSearchOpen(!searchOpen); }} className="optional"/>
-        <button className="primary-button copy-button" onClick={() => void copy()} title="复制 Mermaid 代码块 (Ctrl + Shift + C)"><Copy size={15} strokeWidth={1.5}/><span>复制到 Obsidian</span><span className="compact-copy">复制</span></button>
+        <IconButton icon={ListTree} label="显示大纲" active={outline} disabled={!doc && !outline} onClick={() => { finishEdit(); setOutline(!outline); if (!outline) setLibraryOpen(false); }}/>
+        <IconButton icon={Search} label="查找节点 (Ctrl + F)" active={searchOpen} disabled={!doc} onClick={() => { finishEdit(); setSearchOpen(!searchOpen); }} className="optional"/>
+        <button className="primary-button copy-button" disabled={!doc} onClick={() => void copy()} title="复制 Mermaid 代码块 (Ctrl + Shift + C)"><Copy size={15} strokeWidth={1.5}/><span>复制到 Obsidian</span><span className="compact-copy">复制</span></button>
       </div>
     </header>
 
@@ -993,13 +996,14 @@ export default function App() {
       <main ref={canvas} className={`canvas ${panning ? 'panning' : ''} ${dragId ? 'dragging' : ''}`} data-drag-node={dragId ?? undefined} aria-label="思维导图画布"
         onClickCapture={e => { if (ignoreDragClick.current) { e.preventDefault(); e.stopPropagation(); ignoreDragClick.current = false; } }}
         onContextMenu={e => { e.preventDefault(); }} onPointerDown={e => {
+        if (!docRef.current) return;
         if (e.button !== 0 && e.button !== 1) return;
         if ((e.target as HTMLElement).closest('button, textarea, input, .mind-node, .popover, .search-panel, .selection-toolbar')) return;
         ignoreDragClick.current = false; finishEdit(); setSelectedImage(null); setMenu(false); setContext(null);
         pan.current = { x: e.clientX, y: e.clientY, view: { ...viewRef.current } }; setPanning(true);
         e.currentTarget.setPointerCapture(e.pointerId);
       }}>
-        <div className="world" role="tree" aria-label="导图节点" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}>
+        {doc && layout && <div className="world" role="tree" aria-label="导图节点" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}>
           <svg className="connections" width={layout.width + 40} height={layout.height + 40} aria-hidden="true">
             <defs><marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto" markerUnits="userSpaceOnUse"><path d="M 0 1 L 7 4 L 0 7" fill="none" stroke="var(--node-ink)" strokeWidth="1" strokeLinejoin="round"/></marker></defs>
             {visible.flatMap(node => node.collapsed ? [] : node.children.map(id => {
@@ -1070,16 +1074,16 @@ export default function App() {
               {!!node.children.length && !isEditing && <button className={`collapse-button ${node.collapsed ? 'collapsed' : ''}`} aria-label={`${node.collapsed ? '展开' : '折叠'}分支：${node.text}`} title={node.collapsed ? `展开 ${descendants(doc, node.id).length - 1} 个节点` : '折叠分支 (Space)'} onClick={e => { e.stopPropagation(); toggle(node.id); }}>{node.collapsed ? <span>{descendants(doc, node.id).length - 1}</span> : <Minus size={10}/>}</button>}
             </div>;
           })}
-        </div>
+        </div>}
 
-        {searchOpen && <section className="search-panel" aria-label="查找节点">
+        {doc && searchOpen && <section className="search-panel" aria-label="查找节点">
           <div className="search-input-wrap"><Search size={16}/><input autoFocus aria-label="搜索内容" placeholder="查找你的想法…" value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => { if (e.key === 'Escape') setSearchOpen(false); if (e.key === 'Enter' && matches[0]) goToMatch(matches[0].id); }}/><IconButton icon={X} label="关闭查找" onClick={() => setSearchOpen(false)}/></div>
           {query.trim() && <div className="search-results"><div className="search-caption">{matches.length ? `${matches.length} 个匹配节点` : '没有找到匹配节点'}</div>{matches.slice(0, 60).map(node => <button key={node.id} onClick={() => goToMatch(node.id)}>{node.text}<ArrowRight size={14}/></button>)}</div>}
         </section>}
 
-        <div className="canvas-bottom">
+        {doc && <div className="canvas-bottom">
           <div className="zoom-controls"><IconButton icon={Minus} label="缩小" onClick={() => zoom(0.85)}/><button className="zoom-value" title="恢复 100%" onClick={() => zoom(1 / view.scale)}>{Math.round(view.scale * 100)}%</button><IconButton icon={Plus} label="放大" onClick={() => zoom(1.18)}/><span className="divider"/><IconButton icon={Maximize} label="适应画布 (Ctrl + 0)" onClick={fit}/></div>
-        </div>
+        </div>}
 
         {currentNode && currentBox && <div className="selection-toolbar" onPointerDown={e => e.preventDefault()}>
           <button onClick={() => add('child')} title="添加子节点"><CornerDownRight size={15}/><span>子节点</span><kbd>Tab</kbd></button>
@@ -1095,27 +1099,26 @@ export default function App() {
     {(menu || context) && <div className="popover-dismiss" onPointerDown={() => { setMenu(false); setContext(null); }}/ >}
     {menu && <div className="popover file-menu">
       <div className="menu-label">文件</div>
-      <button onClick={() => void fileAction('new')}><FilePlus2 size={16}/><span>新建导图</span><kbd>Ctrl N</kbd></button>
-      <button onClick={() => void fileAction('open')}><FolderOpen size={16}/><span>打开导图…</span><kbd>Ctrl O</kbd></button>
-      <button onClick={() => void fileAction('save-as')}><Save size={16}/><span>另存为…</span><kbd>Ctrl ⇧ S</kbd></button>
+      <button onClick={() => void fileAction('new')}><FilePlus2 size={16}/><span>新建导图</span><kbd>Ctrl + N</kbd></button>
+      <button onClick={() => void fileAction('open')}><FolderOpen size={16}/><span>打开导图…</span><kbd>Ctrl + O</kbd></button>
+      <button disabled={!doc} onClick={() => void fileAction('save-as')}><Save size={16}/><span>另存为…</span><kbd>Ctrl + Shift + S</kbd></button>
       <div className="menu-separator"/>
-      <button onClick={() => void exportFile()}><Download size={16}/><span>导出为 Markdown</span></button>
-      <button onClick={() => void exportPdf()}><Download size={16}/><span>导出为 PDF</span></button>
+      <button disabled={!doc} onClick={() => void exportFile()}><Download size={16}/><span>导出为 Markdown</span></button>
+      <button disabled={!doc} onClick={() => void exportPdf()}><Download size={16}/><span>导出为 PDF</span></button>
       <button onClick={() => { setMenu(false); void api?.reveal(); }}><Folder size={16}/><span>在文件夹中显示</span><ExternalLink size={12}/></button>
-      <button onClick={() => { setMenu(false); finishEdit(); setHelp(true); }}><Keyboard size={16}/><span>快捷键</span><kbd>?</kbd></button>
-      {session.path && <div className="menu-path" title={session.path}>{session.path}</div>}
+      <button onClick={() => { setMenu(false); finishEdit(); setHelp(true); }}><Keyboard size={16}/><span>快捷键</span></button>
     </div>}
-    {context && <div ref={contextElement} className="popover context-menu" style={{ left: context.x, top: context.y }}>
+    {context && doc && <div ref={contextElement} className="popover context-menu" style={{ left: context.x, top: context.y }}>
       <button onClick={() => { setContext(null); startEdit(); }}><MoreHorizontal size={16}/><span>编辑节点</span><kbd>F2</kbd></button>
-      <button onClick={() => copyNodes()}><Copy size={16}/><span>复制节点</span><kbd>Ctrl C</kbd></button>
-      <button disabled={selected === doc.rootId} onClick={() => copyNodes(selected, true)}><Scissors size={16}/><span>剪切节点</span><kbd>Ctrl X</kbd></button>
-      <button onClick={() => pasteContent()}><ClipboardPaste size={16}/><span>粘贴</span><kbd>Ctrl V</kbd></button>
+      <button onClick={() => copyNodes()}><Copy size={16}/><span>复制节点</span><kbd>Ctrl + C</kbd></button>
+      <button disabled={selected === doc.rootId} onClick={() => copyNodes(selected, true)}><Scissors size={16}/><span>剪切节点</span><kbd>Ctrl + X</kbd></button>
+      <button onClick={() => pasteContent()}><ClipboardPaste size={16}/><span>粘贴</span><kbd>Ctrl + V</kbd></button>
       <button onClick={() => { setContext(null); add('child'); }}><CornerDownRight size={16}/><span>添加子节点</span><kbd>Tab</kbd></button>
       <button onClick={() => { setContext(null); add('sibling'); }}><Plus size={16}/><span>添加同级节点</span><kbd>Enter</kbd></button>
       <button disabled={!currentNode?.children.length} onClick={() => { setContext(null); toggle(); }}><ChevronsUpDown size={16}/><span>{currentNode?.collapsed ? '展开分支' : '折叠分支'}</span><kbd>Space</kbd></button>
       <div className="menu-separator"/>
-      <button disabled={selected === doc.rootId} onClick={() => { apply(reorderNode(docRef.current!, selected, -1)); setContext(null); }}><ArrowUp size={16}/><span>上移</span><kbd>Alt ↑</kbd></button>
-      <button disabled={selected === doc.rootId} onClick={() => { apply(reorderNode(docRef.current!, selected, 1)); setContext(null); }}><ArrowDown size={16}/><span>下移</span><kbd>Alt ↓</kbd></button>
+      <button disabled={selected === doc.rootId} onClick={() => { apply(reorderNode(docRef.current!, selected, -1)); setContext(null); }}><ArrowUp size={16}/><span>上移</span><kbd>Alt + ↑</kbd></button>
+      <button disabled={selected === doc.rootId} onClick={() => { apply(reorderNode(docRef.current!, selected, 1)); setContext(null); }}><ArrowDown size={16}/><span>下移</span><kbd>Alt + ↓</kbd></button>
       <div className="menu-separator"/>
       <button disabled={selected === doc.rootId} onClick={() => remove(true)}><Trash2 size={16}/><span>删除单个节点</span></button>
       <button disabled={selected === doc.rootId} onClick={() => remove()}><Trash2 size={16}/><span>删除节点及分支</span><kbd>Del</kbd></button>

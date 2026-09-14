@@ -174,16 +174,16 @@ try {
   await eventually(async () => (await current()).path === readingMapPath, '未重新打开阅读笔记');
   await assertSelection(readingMapPath);
 
-  // Selecting a context-menu target does not also highlight or open the current map.
+  // Context-menu targets do not replace the existing selection or open another map.
   const menuRow = library().locator('.library-row').filter({ has: page.getByRole('button', { name: '菜单记录', exact: true }) });
   await menuRow.click({ button: 'right' });
   await page.getByRole('menu').waitFor();
-  await assertSelection(menuMap.path);
+  await assertSelection(readingMapPath);
   assert.equal((await current()).path, readingMapPath);
   await page.keyboard.press('Escape');
   await library().getByRole('button', { name: '更多操作：快捷键记录', exact: true }).click();
   await page.getByRole('menu').waitFor();
-  await assertSelection(shortcutMap.path);
+  await assertSelection(readingMapPath);
   assert.equal((await current()).path, readingMapPath);
   await page.keyboard.press('Escape');
   await entry('阅读笔记').click();
@@ -223,7 +223,7 @@ try {
 
   // A nested folder move excludes itself from the picker; renaming its parent also updates the active map.
   await move('阅读', work, [reading]);
-  await assertSelection(path.join(work, '阅读'));
+  await assertSelection(work);
   assert.equal(await exists(reading), false);
   assert.equal((await fs.stat(path.join(work, '阅读'))).isDirectory(), true);
   await rename('工作', '工作资料', true);

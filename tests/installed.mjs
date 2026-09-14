@@ -74,8 +74,8 @@ try {
   assert.equal(await page.locator('.document-title').innerText(), '标题联动检查');
   await library.getByRole('button', { name: '标题联动检查', exact: true }).click({ button: 'right' });
   await page.getByRole('menuitem', { name: '删除', exact: true }).waitFor();
-  assert.equal(await library.locator('.library-row.is-selected').count(), 1);
-  assert.equal(await library.locator('.library-row.is-selected').getAttribute('data-library-path'), state.current);
+  assert.equal(await library.locator('.library-row.is-selected').count(), 0);
+  assert.equal(await library.locator('.library-row.is-current').getAttribute('data-library-path'), state.current);
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: '文件菜单', exact: true }).click();
   assert.equal(await page.getByText('最近打开', { exact: true }).count(), 0);

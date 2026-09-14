@@ -5,7 +5,7 @@ export interface RecentFile { path: string; title: string; updatedAt: string }
 export interface LibraryEntry { kind: 'folder' | 'map'; path: string; name: string; title?: string; children?: LibraryEntry[]; invalid?: boolean }
 export interface LibrarySnapshot { root: string; entries: LibraryEntry[] }
 export interface LibraryMutation { library: LibrarySnapshot; session?: Session; notice?: string }
-export interface Session { doc: MindDocument; path: string; token: string; recent: RecentFile[]; notice?: string }
+export interface Session { doc: MindDocument | null; path: string; token: string; recent: RecentFile[]; notice?: string }
 export interface View { x: number; y: number; scale: number }
 export type Theme = 'light' | 'dark';
 export interface DesktopAPI {

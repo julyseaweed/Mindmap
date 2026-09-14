@@ -54,9 +54,11 @@ const secondFolder = path.join(maps, '第二组');
 const firstFile = path.join(firstFolder, '同名.mindmap');
 const secondFile = path.join(secondFolder, '同名.mindmap');
 const unrelatedFile = path.join(maps, '待删.mindmap');
+const laterFile = path.join(maps, '另一张.mindmap');
 const firstDoc = await fixture(firstFile, '同名', '第一张的独立内容');
 const secondDoc = await fixture(secondFile, '同名', '第二张的独立内容');
 await fixture(unrelatedFile, '待删', '无关资料');
+await fixture(laterFile, '另一张', '空白画布时删除的资料');
 await fs.mkdir(path.join(home, '.mindmap'), { recursive: true });
 await fs.writeFile(path.join(home, '.mindmap', 'workspace.json'), JSON.stringify({
   current: firstFile,
@@ -70,7 +72,7 @@ const launch = async () => {
   page.on('pageerror', error => errors.push(error.message));
   page.on('crash', () => errors.push('renderer crashed'));
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1260, 820));
-  await page.locator('[data-node-id="root"]').waitFor({ timeout: 15000 });
+  await page.locator('.app').waitFor({ timeout: 15000 });
   await library().waitFor();
   await library().locator('.library-scroll').waitFor();
   assert.equal(await library().locator('.library-root').count(), 0);
@@ -92,8 +94,10 @@ const launch = async () => {
     const realHome = await fileSystem.realpath(taskHome);
     if (!inside(realHome, realMaps) || !inside(realHome, realTrash)) throw new Error('回收测试目录解析后超出隔离路径。');
     globalThis.__deleteTestTrash = [];
+    globalThis.__deleteTestFailure = '';
     shell.trashItem = async target => {
       const source = paths.resolve(target);
+      if (source === globalThis.__deleteTestFailure) throw new Error('测试：暂时无法移入回收站');
       if (!paths.isAbsolute(target) || source === mapRoot || !inside(mapRoot, source)) throw new Error('拒绝移动隔离导图库之外的文件。');
       const realSource = await fileSystem.realpath(source);
       if (realSource === realMaps || !inside(realMaps, realSource)) throw new Error('源路径解析后超出隔离导图库。');
@@ -114,21 +118,35 @@ const close = async () => {
   await app.close().catch(() => {});
   app = null;
 };
-const deleteRow = async row => {
-  const target = await row.getAttribute('data-library-path');
-  await row.click({ button: 'right' });
+const selectedPaths = () => library().locator('.library-row.is-selected').evaluateAll(rows => rows.map(row => row.getAttribute('data-library-path')));
+const deleteRow = async (row, { more = false, fails = false } = {}) => {
+  const before = await selectedPaths();
+  if (more) await row.getByRole('button', { name: /^更多操作：/ }).click();
+  else await row.click({ button: 'right' });
   const menu = page.getByRole('menu');
   await menu.waitFor();
-  assert.equal(await library().locator('.library-row.is-selected').count(), 1);
-  assert.equal(await library().locator('.library-row.is-selected').getAttribute('data-library-path'), target);
+  assert.deepEqual(await selectedPaths(), before, '打开操作菜单不应改变原有选择');
   assert.equal(await menu.getByRole('menuitem', { name: '重命名', exact: true }).count(), 1);
   assert.equal(await menu.getByRole('menuitem', { name: '移动到…', exact: true }).count(), 1);
   await menu.getByRole('menuitem', { name: '删除', exact: true }).click();
   await menu.waitFor({ state: 'hidden' });
   await page.locator('.app:not(.busy)').waitFor();
-  await noSaveErrors();
+  if (fails) await page.locator('.app-error').waitFor();
+  else await noSaveErrors();
 };
 const namedRow = label => library().locator('.library-row').filter({ has: page.getByRole('button', { name: label, exact: true }) });
+const assertEmptyCanvas = async (selection = []) => {
+  await eventually(async () => (await session()).doc === null, '会话没有清空');
+  const empty = await session();
+  assert.equal(empty.path, '');
+  assert.equal(empty.token, '');
+  assert.equal(await page.locator('[data-node-id]').count(), 0, '空白画布不应创建占位节点');
+  assert.equal(await page.locator('.document-title, .title-input').count(), 0, '空白画布不应显示导图标题');
+  assert.equal(await page.getByRole('textbox', { name: '编辑节点', exact: true }).count(), 0);
+  assert.equal(await library().locator('.library-row.is-current').count(), 0);
+  assert.deepEqual(await selectedPaths(), selection);
+  await noSaveErrors();
+};
 const editRoot = async text => {
   await page.locator('[data-node-id="root"]').dblclick();
   await page.getByRole('textbox', { name: '编辑节点', exact: true }).fill(text);
@@ -145,49 +163,90 @@ try {
   assert.equal(await rootText().innerText(), firstDoc.nodes.root.text);
 
   // Removing another map leaves both the active path and its canvas unchanged.
+  assert.deepEqual(await selectedPaths(), [firstFile]);
   await deleteRow(namedRow('待删'));
   await eventually(async () => !await exists(unrelatedFile), '非当前导图未删除');
   assert.equal((await session()).path, firstFile);
   assert.equal((await session()).doc.id, firstDoc.id);
   assert.equal(await rootText().innerText(), firstDoc.nodes.root.text);
+  assert.deepEqual(await selectedPaths(), [firstFile]);
 
-  // The replacement has the same title and filename, but a different id and contents.
+  // A failed native trash operation must not clear the selection, document, or view.
+  const beforeFailure = await session();
+  const viewBeforeFailure = await page.locator('.canvas > .world').getAttribute('style');
+  await app.evaluate((_, file) => { globalThis.__deleteTestFailure = file; }, firstFile);
+  await deleteRow(library().locator('.library-row.is-current'), { fails: true });
+  assert.equal(await exists(firstFile), true);
+  assert.deepEqual(await session(), beforeFailure);
+  assert.deepEqual(await selectedPaths(), [firstFile]);
+  assert.equal(await rootText().innerText(), firstDoc.nodes.root.text);
+  assert.equal(await page.locator('.canvas > .world').getAttribute('style'), viewBeforeFailure);
+  await page.getByRole('button', { name: '关闭提示', exact: true }).click();
+  await app.evaluate(() => { globalThis.__deleteTestFailure = ''; });
+  await noSaveErrors();
+
+  // Removing the active map leaves an empty canvas even while other maps remain.
   await deleteRow(library().locator('.library-row.is-current'));
-  await eventually(async () => (await session()).path === secondFile, '删除当前导图后未切换到剩余导图');
-  await page.waitForFunction(text => document.querySelector('[data-node-id="root"] .node-text')?.textContent === text, secondDoc.nodes.root.text);
-  assert.equal((await session()).doc.id, secondDoc.id);
-  assert.equal(await page.locator('.document-title').innerText(), '同名');
+  await assertEmptyCanvas();
   assert.equal(await exists(firstFile), false);
   assert.equal(await exists(secondFile), true);
+  assert.equal(await exists(laterFile), true);
+  const removedBeforeRestart = await app.evaluate(() => globalThis.__deleteTestTrash);
+  await close();
+  assert.equal(JSON.parse(await fs.readFile(path.join(home, '.mindmap', 'workspace.json'), 'utf8')).current, null);
 
-  // Deleting the directory containing the current map enters an unsaved blank session.
+  // Restart preserves an intentionally empty canvas instead of opening a remaining map.
+  await launch();
+  await assertEmptyCanvas();
+  assert.equal(await exists(secondFile), true);
+  await namedRow('第一组').getByRole('button', { name: '第一组', exact: true }).click();
+  await assertEmptyCanvas([firstFolder]);
+  await deleteRow(namedRow('另一张'), { more: true });
+  await eventually(async () => !await exists(laterFile), '空白画布上的旁侧导图未删除');
+  await assertEmptyCanvas([firstFolder]);
+
+  // Deleting the selected folder clears only that selection.
+  await deleteRow(namedRow('第一组'));
+  await assertEmptyCanvas();
+  assert.equal(await exists(firstFolder), false);
+
+  // Ctrl+O remains available without an active document.
+  await app.evaluate(({ dialog }, file) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [file] }); }, secondFile);
+  await page.keyboard.press('Control+o');
+  await rootText().waitFor();
+  await eventually(async () => (await session()).path === secondFile, '空白画布不能通过快捷键打开导图');
+  assert.equal((await session()).doc.id, secondDoc.id);
+  assert.equal(await rootText().innerText(), secondDoc.nodes.root.text);
+  assert.deepEqual(await selectedPaths(), [secondFile]);
+
+  // Selecting a folder does not close its open map. Deleting that parent does.
+  await namedRow('第二组').getByRole('button', { name: '第二组', exact: true }).click();
+  assert.equal((await session()).path, secondFile);
+  assert.equal(await rootText().innerText(), secondDoc.nodes.root.text);
+  assert.deepEqual(await selectedPaths(), [secondFolder]);
   await deleteRow(namedRow('第二组'));
   await eventually(async () => !await exists(secondFolder), '含当前导图的文件夹未删除');
+  await assertEmptyCanvas();
   assert.deepEqual(await mapFiles(), []);
-  let draft = await session();
-  assert.equal(Object.keys(draft.doc.nodes).length, 1);
-  assert.equal(draft.doc.nodes[draft.doc.rootId].text, '');
-  await deleteRow(namedRow('第一组'));
-  assert.deepEqual(await fs.readdir(maps), []);
   await library().getByText('暂无导图', { exact: true }).waitFor();
-  assert.equal(await library().locator('.library-row.is-selected').count(), 0);
 
-  const removed = await app.evaluate(() => globalThis.__deleteTestTrash);
-  assert.deepEqual(removed.map(item => item.source), [unrelatedFile, firstFile, secondFolder, firstFolder]);
+  const removed = [...removedBeforeRestart, ...await app.evaluate(() => globalThis.__deleteTestTrash)];
+  assert.deepEqual(removed.map(item => item.source), [unrelatedFile, firstFile, laterFile, firstFolder, secondFolder]);
   for (const item of removed) assert.equal(await exists(item.destination), true);
   const secondTrash = removed.find(item => item.source === secondFolder);
   assert.deepEqual(JSON.parse(await fs.readFile(path.join(secondTrash.destination, '同名.mindmap'), 'utf8')), secondDoc);
   await close();
   assert.deepEqual(await fs.readdir(maps), []);
 
-  // Restarting an intentionally empty library must not create a placeholder on disk.
+  // An empty library also stays blank on restart; only an explicit new-map action creates a document.
   await launch();
   assert.deepEqual(await fs.readdir(maps), []);
-  draft = await session();
-  assert.equal(draft.doc.nodes[draft.doc.rootId].text, '');
+  await assertEmptyCanvas();
   await library().getByText('暂无导图', { exact: true }).waitFor();
+  await page.keyboard.press('Control+n');
   const editor = page.getByRole('textbox', { name: '编辑节点', exact: true });
   await editor.waitFor();
+  assert.equal(await editor.inputValue(), '');
   await page.waitForFunction(() => {
     const editor = document.activeElement;
     return editor?.getAttribute('aria-label') === '编辑节点' && editor.selectionStart === 0 && editor.selectionEnd === editor.value.length;
@@ -219,7 +278,7 @@ try {
   assert.equal((await session()).path, persisted.path);
   assert.equal((await session()).doc.nodes.root.text, '重新开始\n第二次保存');
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ success: true, home, reversibleTrash: trash, currentFile: persisted.path, checks: ['right-click actions', 'delete inactive map', 'switch to same-title map', 'delete active parent folder', 'empty draft', 'empty restart', 'first edit persists', 'continue saving', 'reopen persisted map'] }, null, 2));
+  console.log(JSON.stringify({ success: true, home, reversibleTrash: trash, currentFile: persisted.path, checks: ['right-click and more-menu preserve selection', 'delete inactive map preserves canvas', 'failed deletion preserves document and view', 'delete active map leaves empty canvas with other maps remaining', 'empty restart', 'folder selection survives deleting another map', 'deleting selected folder clears selection', 'open from empty canvas', 'delete active parent folder', 'new from empty canvas', 'edit persists without stealing selection', 'continue saving', 'reopen persisted map'] }, null, 2));
 } catch (error) {
   if (page && !page.isClosed()) {
     await page.screenshot({ path: path.join(results, 'delete-failure.png') }).catch(() => {});

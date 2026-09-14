@@ -230,7 +230,10 @@ export default function LibraryPanel({ snapshot, currentPath, selectedPath, sele
     setSubmitting(true);
     try { await onDelete(entry.path); }
     catch { /* The app displays the storage error without dismissing the active map. */ }
-    finally { setSubmitting(false); }
+    finally {
+      setSubmitting(false);
+      requestAnimationFrame(() => scroll.current?.querySelector<HTMLButtonElement>('.library-row.is-selected .library-entry')?.focus({ preventScroll: true }));
+    }
   };
 
   const modalKeyDown = (event: KeyboardEvent) => {
@@ -268,7 +271,6 @@ export default function LibraryPanel({ snapshot, currentPath, selectedPath, sele
       }} onContextMenu={event => {
         event.preventDefault(); event.stopPropagation();
         if (locked) return;
-        onSelectEntry(entry);
         returnFocus.current = event.currentTarget.querySelector<HTMLButtonElement>('.library-entry');
         setMenu({ entry, top: Math.max(8, Math.min(event.clientY, window.innerHeight - 126)), left: Math.max(8, Math.min(event.clientX, window.innerWidth - 140)) });
       }}>
@@ -283,7 +285,6 @@ export default function LibraryPanel({ snapshot, currentPath, selectedPath, sele
           <Icon size={15} strokeWidth={1.5}/><span>{label}</span>
         </button>
         <button type="button" className="library-icon-button library-more" title={`更多操作：${label}`} aria-label={`更多操作：${label}`} aria-haspopup="menu" aria-expanded={menu?.entry.path === entry.path} disabled={locked} onClick={event => {
-          onSelectEntry(entry);
           const rect = event.currentTarget.getBoundingClientRect();
           returnFocus.current = event.currentTarget;
           setMenu(menu?.entry.path === entry.path ? null : { entry, top: Math.min(rect.bottom + 4, window.innerHeight - 126), left: Math.max(8, Math.min(rect.right - 132, window.innerWidth - 140)) });

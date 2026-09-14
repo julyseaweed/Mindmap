@@ -546,8 +546,9 @@ test('deleting another map recycles its bytes and preserves the active session',
   assert.equal((await new LocalStore(dir).boot()).path, active.path);
 });
 
-test('deleting the active map waits for saves and switches to a different map even with the same title', async t => {
+test('deleting the active map waits for saves and stays empty despite other maps with the same title', async t => {
   const { store, session, dir } = await storeFixture(t);
+  const survivorBytes = await fs.readFile(session.path, 'utf8');
   const active = await store.create(createDocument());
   const edited = addNode(active.doc, 'root').doc;
   const { trash, items } = await simulatedTrash(dir);
@@ -555,48 +556,57 @@ test('deleting the active map waits for saves and switches to a different map ev
   const deleting = store.deleteLibraryItem(active.path, trash);
   await saving;
   const result = await deleting;
-  assert.equal(result.session.path, session.path);
-  assert.equal(result.session.doc.title, active.doc.title);
-  assert.notEqual(result.session.doc.id, active.doc.id);
+  assert.equal(result.session.path, '');
+  assert.equal(result.session.doc, null);
+  assert.equal(result.session.token, '');
+  assert.equal(store.current, null);
   assert.deepEqual(JSON.parse(await fs.readFile(items[0].destination, 'utf8')), edited);
   await assert.rejects(store.save(edited, active.token), /文件已切换/);
-  await store.save(addNode(result.session.doc, 'root').doc, result.session.token);
-  assert.equal((await new LocalStore(dir).boot()).path, session.path);
+  assert.equal(await fs.readFile(session.path, 'utf8'), survivorBytes);
+  const restarted = new LocalStore(dir);
+  assert.equal((await restarted.boot()).doc, null);
+  assert.equal(restarted.snapshot().path, '');
+  assert.equal((await restarted.open(session.path)).path, session.path);
 });
 
-test('a successful recycle returns a usable replacement session when workspace recording fails', async t => {
+test('a successful recycle returns an empty session when workspace recording fails with other maps remaining', async t => {
   const { store, session, dir } = await storeFixture(t);
   const active = await store.create(createDocument('待移除'));
   const { trash, items } = await simulatedTrash(dir);
   const remember = store.remember;
   store.remember = async () => { throw new Error('位置记录只读'); };
   const removed = await store.deleteLibraryItem(active.path, trash);
-  assert.equal(removed.session.path, session.path);
-  assert.deepEqual(removed.session.doc, session.doc);
-  assert.notEqual(removed.session.token, active.token);
+  assert.equal(removed.session.path, '');
+  assert.equal(removed.session.doc, null);
+  assert.equal(removed.session.token, '');
   assert.match(removed.notice, /已移入回收站.*位置记录/);
   assert.deepEqual(JSON.parse(await fs.readFile(items[0].destination, 'utf8')), active.doc);
   await assert.rejects(fs.access(active.path), { code: 'ENOENT' });
   store.remember = remember;
-  const edited = addNode(removed.session.doc, 'root').doc;
-  await store.save(edited, removed.session.token);
-  assert.deepEqual((await new LocalStore(dir).boot()).doc, edited);
+  const restarted = new LocalStore(dir);
+  assert.equal((await restarted.boot()).doc, null);
+  assert.deepEqual(JSON.parse(await fs.readFile(session.path, 'utf8')), session.doc);
+  assert.deepEqual((await restarted.open(session.path)).doc, session.doc);
 });
 
-test('recycling the last map returns a writable blank session when workspace recording fails', async t => {
+test('recycling the last map stays empty when workspace recording fails and allows an explicit new map', async t => {
   const { store, session, dir } = await storeFixture(t);
   const { trash } = await simulatedTrash(dir);
   const remember = store.remember;
   store.remember = async () => { throw new Error('位置记录只读'); };
   const removed = await store.deleteLibraryItem(session.path, trash);
   assert.equal(removed.session.path, '');
+  assert.equal(removed.session.doc, null);
   assert.equal(removed.library.entries.length, 0);
-  assert.notEqual(removed.session.token, session.token);
+  assert.equal(removed.session.token, '');
   assert.match(removed.notice, /已移入回收站.*位置记录/);
   await assert.rejects(fs.access(session.path), { code: 'ENOENT' });
   store.remember = remember;
-  const edited = addNode(removed.session.doc, 'root', 'child', '继续记录').doc;
-  await store.save(edited, removed.session.token);
+  assert.equal((await new LocalStore(dir).boot()).doc, null);
+  assert.deepEqual(await fs.readdir(store.maps), []);
+  const created = await store.create();
+  const edited = addNode(created.doc, 'root', 'child', '继续记录').doc;
+  await store.save(edited, created.token);
   assert.deepEqual((await new LocalStore(dir).boot()).doc, edited);
 });
 
@@ -611,51 +621,131 @@ test('deleting a folder removes descendant state and recovery without touching a
   await atomicWrite(store.recoveryPath, JSON.stringify({ path: active.path, doc: addNode(active.doc, 'root').doc }));
   const { trash, items } = await simulatedTrash(dir);
   const result = await store.deleteLibraryItem(folder, trash);
-  assert.equal(result.session.path, session.path);
+  assert.equal(result.session.path, '');
+  assert.equal(result.session.doc, null);
   assert.ok(!result.session.recent.some(item => [first.path, active.path].includes(item.path)));
   assert.equal(await fs.readFile(path.join(items[0].destination, '子目录', '当前图.mindmap'), 'utf8'), JSON.stringify(active.doc, null, 2));
   await assert.rejects(fs.access(store.recoveryPath), { code: 'ENOENT' });
   assert.ok((await fs.stat(path.join(store.maps, '资料2'))).isDirectory());
   const restarted = new LocalStore(dir);
-  assert.equal((await restarted.boot()).path, session.path);
+  assert.equal((await restarted.boot()).doc, null);
+  assert.deepEqual(JSON.parse(await fs.readFile(session.path, 'utf8')), session.doc);
   assert.ok(!(await restarted.library()).entries.some(entry => entry.path === folder || entry.title?.includes('恢复')));
 });
 
-test('deleting the final map stays empty across restarts and first editing saves a unique new file', async t => {
+test('deleting the final map stays empty across restarts until a new map is explicitly created', async t => {
   const { store, session, dir } = await storeFixture(t);
   const { trash } = await simulatedTrash(dir);
   const removed = await store.deleteLibraryItem(session.path, trash);
   assert.equal(removed.library.entries.length, 0);
   assert.equal(removed.session.path, '');
-  assert.notEqual(removed.session.doc.id, session.doc.id);
-  assert.notEqual(removed.session.token, session.token);
+  assert.equal(removed.session.doc, null);
+  assert.equal(removed.session.token, '');
   await assert.rejects(store.save(session.doc, session.token), /文件已切换/);
-  assert.deepEqual(await store.save(removed.session.doc, removed.session.token), { path: '' });
   assert.deepEqual(await fs.readdir(store.maps), []);
   const workspace = JSON.parse(await fs.readFile(store.statePath, 'utf8'));
   assert.equal(workspace.current, null);
-  assert.equal(workspace.draftOnly, true);
+  assert.equal(workspace.draftOnly, false);
+  assert.equal(workspace.emptyCanvas, true);
   assert.deepEqual(workspace.recent, []);
 
   const restarted = new LocalStore(dir);
-  const draft = await restarted.boot();
-  assert.equal(draft.path, '');
+  const empty = await restarted.boot();
+  assert.equal(empty.path, '');
+  assert.equal(empty.doc, null);
+  assert.equal(empty.token, '');
   assert.deepEqual(await fs.readdir(store.maps), []);
   const collision = path.join(store.maps, '新的想法.mindmap');
   const collisionBytes = JSON.stringify(createDocument('已有文件'));
   await fs.writeFile(collision, collisionBytes);
-  const edited = structuredClone(draft.doc);
-  edited.title = '新的想法';
+  const created = await restarted.create(createDocument('新的想法'));
+  assert.equal(created.path, path.join(store.maps, '新的想法 2.mindmap'));
+  assert.ok(created.token);
+  const edited = structuredClone(created.doc);
   edited.nodes.root.text = '新的想法';
-  const saved = await restarted.save(edited, draft.token);
+  const saved = await restarted.save(edited, created.token);
   assert.equal(saved.path, path.join(store.maps, '新的想法 2.mindmap'));
-  assert.equal(restarted.snapshot().token, draft.token);
+  assert.equal(restarted.snapshot().token, created.token);
   assert.equal(await fs.readFile(collision, 'utf8'), collisionBytes);
   assert.deepEqual(JSON.parse(await fs.readFile(saved.path, 'utf8')), edited);
   const afterEdit = addNode(edited, 'root').doc;
-  await restarted.save(afterEdit, draft.token);
+  await restarted.save(afterEdit, created.token);
   assert.deepEqual((await new LocalStore(dir).boot()).doc, afterEdit);
   assert.equal(JSON.parse(await fs.readFile(store.statePath, 'utf8')).draftOnly, false);
+  assert.equal(JSON.parse(await fs.readFile(store.statePath, 'utf8')).emptyCanvas, false);
+});
+
+test('deleting an inactive map while the canvas is empty preserves the empty session', async t => {
+  const { store, session, dir } = await storeFixture(t);
+  const active = await store.create(createDocument('最后打开'));
+  const { trash } = await simulatedTrash(dir);
+  await store.deleteLibraryItem(active.path, trash);
+  const result = await store.deleteLibraryItem(session.path, trash);
+  assert.equal(result.session, undefined);
+  assert.equal(store.snapshot().doc, null);
+  assert.equal(store.snapshot().token, '');
+  assert.deepEqual(await fs.readdir(store.maps), []);
+  assert.equal((await new LocalStore(dir).boot()).doc, null);
+});
+
+test('a recovery cleanup failure cannot resurrect an explicitly deleted map on restart', async t => {
+  const { store, session, dir } = await storeFixture(t);
+  const active = await store.create(createDocument('已删除'));
+  const pending = addNode(active.doc, 'root', 'child', '不应恢复').doc;
+  const recoveryBytes = JSON.stringify({ path: active.path, doc: pending });
+  await atomicWrite(store.recoveryPath, recoveryBytes);
+  store.clearRecovery = async () => { throw new Error('恢复日志暂时无法删除'); };
+  const { trash } = await simulatedTrash(dir);
+  const removed = await store.deleteLibraryItem(active.path, trash);
+  assert.equal(removed.session.doc, null);
+  assert.match(removed.notice, /已移入回收站/);
+  assert.equal(await fs.readFile(store.recoveryPath, 'utf8'), recoveryBytes);
+  assert.match(JSON.parse(await fs.readFile(store.statePath, 'utf8')).discardedRecoveryHash, /^[a-f0-9]{64}$/);
+
+  const restarted = new LocalStore(dir);
+  assert.equal((await restarted.boot()).doc, null);
+  assert.deepEqual(await fs.readdir(store.maps), [path.basename(session.path)]);
+  assert.deepEqual(JSON.parse(await fs.readFile(session.path, 'utf8')), session.doc);
+  await assert.rejects(fs.access(store.recoveryPath), { code: 'ENOENT' });
+});
+
+test('the empty canvas and discarded journal marker still allow recovery of a newer document', async t => {
+  const { store, session, dir } = await storeFixture(t);
+  await atomicWrite(store.recoveryPath, JSON.stringify({ path: session.path, doc: session.doc }));
+  store.clearRecovery = async () => { throw new Error('恢复日志暂时无法删除'); };
+  const { trash } = await simulatedTrash(dir);
+  await store.deleteLibraryItem(session.path, trash);
+
+  const newer = createDocument('后续未完成保存');
+  newer.nodes.root.text = '需要保留的新内容';
+  await atomicWrite(store.recoveryPath, JSON.stringify({ path: path.join(store.maps, '后续.mindmap'), doc: newer }));
+  const restarted = new LocalStore(dir);
+  const recovered = await restarted.boot();
+  assert.match(recovered.notice, /恢复/);
+  assert.deepEqual(recovered.doc.nodes, newer.nodes);
+  assert.notEqual(recovered.doc.id, newer.id);
+  assert.notEqual(recovered.path, session.path);
+  assert.equal(JSON.parse(await fs.readFile(store.statePath, 'utf8')).emptyCanvas, false);
+  assert.equal((await restarted.library()).entries.length, 1);
+});
+
+test('legacy draftOnly workspaces remain editable without opening another library map', async t => {
+  const { store, session, dir } = await storeFixture(t);
+  const original = await fs.readFile(session.path, 'utf8');
+  await atomicWrite(store.statePath, JSON.stringify({ current: null, recent: [], draftOnly: true }));
+  const restarted = new LocalStore(dir);
+  const draft = await restarted.boot();
+  assert.equal(draft.path, '');
+  assert.ok(draft.token);
+  assert.equal(draft.doc.nodes.root.text, '');
+  assert.notEqual(draft.doc.id, session.doc.id);
+  assert.deepEqual(await fs.readdir(store.maps), [path.basename(session.path)]);
+  const edited = addNode(draft.doc, 'root', 'child', '继续草稿').doc;
+  const saved = await restarted.save(edited, draft.token);
+  assert.notEqual(saved.path, '');
+  assert.notEqual(saved.path, session.path);
+  assert.equal(await fs.readFile(session.path, 'utf8'), original);
+  assert.deepEqual((await new LocalStore(dir).boot()).doc, edited);
 });
 
 test('recycle failure preserves file, recovery, workspace, and active token', async t => {
@@ -673,15 +763,16 @@ test('recycle failure preserves file, recovery, workspace, and active token', as
   await store.save(addNode(session.doc, 'root').doc, session.token);
 });
 
-test('remaining invalid maps do not prevent an empty draft after the last valid map is deleted', async t => {
+test('remaining invalid maps do not prevent an empty canvas after the last valid map is deleted', async t => {
   const { store, session, dir } = await storeFixture(t);
   await fs.writeFile(path.join(store.maps, '损坏.mindmap'), '{broken');
   const { trash } = await simulatedTrash(dir);
   const result = await store.deleteLibraryItem(session.path, trash);
   assert.equal(result.session.path, '');
+  assert.equal(result.session.doc, null);
   assert.equal(result.library.entries.length, 1);
   assert.equal(result.library.entries[0].invalid, true);
-  assert.equal((await new LocalStore(dir).boot()).path, '');
+  assert.equal((await new LocalStore(dir).boot()).doc, null);
   assert.deepEqual(await fs.readdir(store.maps), ['损坏.mindmap']);
 });
 

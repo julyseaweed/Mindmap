@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createDocument, validateDocument } from '../src/core.mjs';
 
 export async function atomicWrite(file, content) {
@@ -24,6 +24,7 @@ const sameKey = (a, b) => comparableKey(a) === comparableKey(b);
 const insideKey = (root, key) => sameKey(root, key) || comparableKey(key).startsWith(comparableKey(root) + '/');
 const displayName = entry => entry.kind === 'folder' ? entry.name : entry.title || entry.name.replace(/\.mindmap$/i, '');
 const MAX_DOCUMENT_BYTES = 128 * 1024 * 1024;
+const recoveryHash = content => createHash('sha256').update(content).digest('hex');
 const entryName = value => {
   if (typeof value !== 'string') throw new Error('请输入有效名称。');
   const name = value.trim();
@@ -51,10 +52,14 @@ export class LocalStore {
     try { this.state = JSON.parse(await fs.readFile(this.statePath, 'utf8')); } catch {}
     if (!this.state || !Array.isArray(this.state.recent)) this.state = { recent: [], current: null };
     this.state.recent = this.state.recent.filter(item => item && typeof item.path === 'string' && path.isAbsolute(item.path));
-    let notice;
     // A failed or interrupted disk write is restored as a separate file, keeping the original intact.
     try {
-      const recovery = JSON.parse(await fs.readFile(this.recoveryPath, 'utf8'));
+      const recoveryContent = await fs.readFile(this.recoveryPath, 'utf8');
+      if (this.state.discardedRecoveryHash === recoveryHash(recoveryContent)) {
+        await this.clearRecovery().catch(() => {});
+        throw new Error('Recovery belongs to an explicitly deleted document.');
+      }
+      const recovery = JSON.parse(recoveryContent);
       const doc = validateDocument(recovery.doc);
       let saved = null;
       try { saved = validateDocument(JSON.parse(await fs.readFile(recovery.path, 'utf8'))); }
@@ -72,19 +77,23 @@ export class LocalStore {
       await this.finishSaveMetadata();
       return result;
     } catch {}
+    if (this.state.emptyCanvas === true) return this.openEmpty();
     if (this.state.current) {
       try { return await this.open(this.state.current); }
-      catch { notice = '上次的文件已移动或无法读取。你可以从文件菜单重新打开。'; }
+      catch {
+        const result = await this.openEmpty();
+        return { ...result, notice: result.notice ?? '上次的文件已移动或无法读取。你可以从文件菜单重新打开。' };
+      }
     }
-    const result = this.state.draftOnly ? await this.openDraft() : await this.create();
-    return { ...result, notice: result.notice ?? notice };
+    return this.state.draftOnly ? this.openDraft() : this.create();
   }
 
   async remember() {
     const current = this.current;
-    this.state.current = current.path || null;
-    this.state.draftOnly = !current.path;
-    if (current.path) this.state.recent = [{ path: current.path, title: current.doc.title, updatedAt: new Date().toISOString() }, ...this.state.recent.filter(item => item.path !== current.path)].slice(0, 12);
+    this.state.current = current?.path || null;
+    this.state.draftOnly = !!current && !current.path;
+    this.state.emptyCanvas = !current;
+    if (current?.path) this.state.recent = [{ path: current.path, title: current.doc.title, updatedAt: new Date().toISOString() }, ...this.state.recent.filter(item => item.path !== current.path)].slice(0, 12);
     await atomicWrite(this.statePath, JSON.stringify(this.state, null, 2));
   }
 
@@ -92,7 +101,7 @@ export class LocalStore {
     try { await this.remember(); }
     catch {
       // Reading/creating the document already succeeded; never strand the renderer on its old token.
-      return { ...this.snapshot(), notice: '位置记录未能保存，当前导图仍可使用。请重新打开导图或继续编辑后保存。' };
+      return { ...this.snapshot(), notice: this.current ? '位置记录未能保存，当前导图仍可使用。请重新打开导图或继续编辑后保存。' : '位置记录未能保存，当前画布已清空。' };
     }
     return this.snapshot();
   }
@@ -117,8 +126,14 @@ export class LocalStore {
     return this.rememberSession();
   }
 
+  async openEmpty() {
+    this.current = null;
+    this.saveMetadataPending = false;
+    return this.rememberSession();
+  }
+
   snapshot() {
-    return structuredClone({ doc: this.current.doc, path: this.current.path, token: this.current.token, recent: this.state.recent });
+    return structuredClone({ doc: this.current?.doc ?? null, path: this.current?.path ?? '', token: this.current?.token ?? '', recent: this.state.recent });
   }
 
   enqueue(operation) {
@@ -480,38 +495,28 @@ export class LocalStore {
       const positionNotice = '已移入回收站，但位置记录未能保存，请重新打开导图或继续编辑后保存。';
       this.state.recent = this.state.recent.filter(item => !affected(item.path));
       if (affected(this.state.current)) this.state.current = null;
+      try {
+        let recoveryContent, recovery;
+        try {
+          recoveryContent = await fs.readFile(this.recoveryPath, 'utf8');
+          recovery = JSON.parse(recoveryContent);
+        } catch {}
+        if (recovery && affected(recovery.path)) {
+          // Persist the exact discarded journal so failed cleanup cannot revive a deleted map.
+          // A subsequent, different recovery snapshot must still be recoverable.
+          this.state.discardedRecoveryHash = recoveryHash(recoveryContent);
+          await this.clearRecovery();
+        }
+      } catch { notice = positionNotice; }
       // Establish a valid in-memory session before metadata IO, even if recording it fails.
       try {
         if (activeRemoved || this.current) {
-          const session = activeRemoved ? await this.openDraft() : await this.rememberSession();
+          const session = activeRemoved ? await this.openEmpty() : await this.rememberSession();
           if (session.notice) notice = `已移入回收站。${session.notice}`;
         }
         else await atomicWrite(this.statePath, JSON.stringify(this.state, null, 2));
       } catch { notice = positionNotice; }
-      try {
-        let recovery;
-        try { recovery = JSON.parse(await fs.readFile(this.recoveryPath, 'utf8')); } catch {}
-        if (recovery && affected(recovery.path)) await fs.rm(this.recoveryPath, { force: true });
-      } catch { notice = positionNotice; }
-
       const library = await this.readLibrary();
-      if (activeRemoved) {
-        const candidates = [];
-        const collect = entries => {
-          for (const entry of entries) {
-            if (entry.kind === 'folder') collect(entry.children ?? []);
-            else if (!entry.invalid) candidates.push(entry.path);
-          }
-        };
-        collect(library.entries);
-        for (const file of candidates) {
-          try {
-            const session = await this.openCurrent(file);
-            if (session.notice) notice = `已移入回收站。${session.notice}`;
-            break;
-          } catch { /* A remaining file may have moved since the library was read. */ }
-        }
-      }
       return { library, ...(activeRemoved ? { session: this.snapshot() } : {}), ...(notice ? { notice } : {}) };
     });
   }
