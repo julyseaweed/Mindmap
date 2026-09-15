@@ -57,7 +57,8 @@ button svg { flex-shrink: 0; }
 kbd { font-family: var(--font-mono); color: var(--muted); font-size: 10px; font-weight: 400; white-space: nowrap; }
 .app { height: 100%; display: flex; flex-direction: column; }
 .titlebar { height: 53px; flex-shrink: 0; display: flex; align-items: center; padding: 0 152px 0 22px; background: var(--surface); -webkit-app-region: drag; user-select: none; }
-.theme-toggle { margin-left: auto; width: 32px; height: 32px; -webkit-app-region: no-drag; }
+.appearance-controls { margin-left: auto; display: flex; align-items: center; gap: 2px; -webkit-app-region: no-drag; }
+.appearance-controls .icon-button { width: 32px; height: 32px; }
 .brand { display: flex; align-items: center; gap: 10px; white-space: nowrap; font-family: var(--font); font-size: 16px; letter-spacing: -.2px; }
 .brand { font-weight: 400; }
 .toolbar { min-height: 73px; padding: 11px 23px 12px; display: flex; align-items: center; justify-content: space-between; gap: 18px; border-top: 1px solid var(--line-faint); border-bottom: 1px solid var(--line); background: var(--surface); z-index: 10; }
@@ -84,10 +85,6 @@ kbd { font-family: var(--font-mono); color: var(--muted); font-size: 10px; font-
 .canvas.dragging, .canvas.dragging * { cursor: grabbing !important; }
 .canvas.adding-relationship, .canvas.adding-relationship .mind-node { cursor: crosshair; }
 .mind-node.relationship-target { outline: 1px dashed var(--node-ink); outline-offset: 5px; }
-.font-menu-field { display: flex; align-items: center; gap: 11px; min-height: 35px; padding: 5px 10px; font-size: 12px; }
-.font-menu-field > svg { flex-shrink: 0; }
-.font-menu-field > span { flex: 1; }
-.font-menu-field select { border: 1px solid var(--line); border-radius: 4px; padding: 4px 6px; max-width: 145px; background: var(--surface); cursor: pointer; }
 .world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
 .connections { position: absolute; top: 0; left: 0; overflow: visible; pointer-events: none; }
 .mind-node { position: absolute; border: var(--node-border-width) solid var(--node-ink); border-radius: 3px; background: var(--paper); color: var(--node-ink); display: flex; align-items: center; justify-content: center; padding: var(--node-padding-y) var(--node-padding-x); cursor: grab; touch-action: none; font-family: var(--font-node); font-size: var(--node-font-size); line-height: var(--node-line-height); }

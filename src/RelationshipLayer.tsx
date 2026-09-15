@@ -3,11 +3,12 @@ import type { PointerEvent } from 'react';
 import type { Box } from './core.mjs';
 import type { MindRelationship } from './types';
 import { relationshipGeometry } from './relationships.mjs';
-import type { RelationshipControls } from './relationships.mjs';
+import type { RelationshipControls, RelationshipRoutingContext } from './relationships.mjs';
 import './relationships.css';
 
 interface RelationshipLayerProps {
   relationships: MindRelationship[];
+  context?: RelationshipRoutingContext;
   boxes: Record<string, Box>;
   measure(text: string): number;
   selectedId: string | null;
@@ -98,7 +99,7 @@ export default function RelationshipLayer(props: RelationshipLayerProps) {
     if (event.button !== 0 || callbacks.current.disabled) return;
     if (callbacks.current.editingId) callbacks.current.onFinishEdit();
     event.preventDefault(); cancel();
-    const geometry = relationshipGeometry(relationship, callbacks.current.boxes, callbacks.current.measure);
+    const geometry = relationshipGeometry(relationship, callbacks.current.boxes, callbacks.current.measure, callbacks.current.context);
     if (!geometry) return;
     const controls = { control1: { ...geometry.control1 }, control2: { ...geometry.control2 } };
     gesture.current = {
@@ -148,7 +149,7 @@ export default function RelationshipLayer(props: RelationshipLayerProps) {
   };
 
   const geometries = props.relationships.flatMap(relationship => {
-    const geometry = relationshipGeometry(preview?.id === relationship.id ? { ...relationship, ...preview.controls } : relationship, props.boxes, props.measure);
+    const geometry = relationshipGeometry(preview?.id === relationship.id ? { ...relationship, ...preview.controls } : relationship, props.boxes, props.measure, props.context);
     return geometry ? [{ relationship, geometry }] : [];
   });
 

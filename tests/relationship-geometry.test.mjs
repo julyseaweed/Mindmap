@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { relationshipBounds, relationshipGeometry } from '../src/relationships.mjs';
+import { createDocument, layoutTree } from '../src/core.mjs';
 
 const box = (id, x, y, width = 100, height = 40) => ({ id, x, y, width, height });
 const relation = { id: 'relation', sourceId: 'a', targetId: 'b', text: '' };
@@ -108,4 +109,103 @@ test('zero and nearly straight control vectors produce finite geometry', () => {
     for (const value of Object.values(result.bounds)) assert.ok(Number.isFinite(value));
     assert.ok(!/NaN|Infinity/.test(result.path));
   }
+});
+
+const samples = (geometry, count = 1200) => Array.from({ length: count + 1 }, (_, i) => {
+  const t = i / count, u = 1 - t;
+  return {
+    x: u ** 3 * geometry.start.x + 3 * u ** 2 * t * geometry.c1.x + 3 * u * t ** 2 * geometry.c2.x + t ** 3 * geometry.end.x,
+    y: u ** 3 * geometry.start.y + 3 * u ** 2 * t * geometry.c1.y + 3 * u * t ** 2 * geometry.c2.y + t ** 3 * geometry.end.y,
+  };
+});
+const inside = (point, rect, inset = 0) => point.x > rect.x + inset && point.x < rect.x + rect.width - inset && point.y > rect.y + inset && point.y < rect.y + rect.height - inset;
+const overlap = (a, b) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+const assertClearNodes = (geometry, boxes) => {
+  for (const [id, rect] of Object.entries(boxes)) {
+    assert.ok(samples(geometry).every(point => !inside(point, rect, .05)), `curve intersects node ${id}`);
+    assert.ok(!overlap(geometry.label, rect), `caption intersects node ${id}`);
+  }
+};
+const treeFixture = () => ({
+  ...createDocument('阅读与思考'),
+  nodes: {
+    root: { id: 'root', text: '阅读与思考', children: ['alpha', 'beta', 'gamma'] },
+    alpha: { id: 'alpha', text: '观察\nObservation', children: ['detail'] },
+    detail: { id: 'detail', text: '一个具体例子', children: [] },
+    beta: { id: 'beta', text: '推论\nConclusion', children: [] },
+    gamma: { id: 'gamma', text: '其他思考', children: [] },
+  },
+  relationships: [{ id: 'link', sourceId: 'alpha', targetId: 'beta', text: '产生推论\nRelationship' }],
+});
+
+test('a relationship between siblings clears their tree, child node and caption without a large detour', () => {
+  const doc = treeFixture(), layout = layoutTree(doc);
+  const geometry = relationshipGeometry(doc.relationships[0], layout.boxes, undefined, doc);
+  assertClearNodes(geometry, layout.boxes);
+  perimeter(geometry.start, layout.boxes.alpha); perimeter(geometry.end, layout.boxes.beta);
+  assert.ok(Math.hypot(geometry.control1.x, geometry.control1.y) < 360, 'nearby siblings need a compact arch');
+  assert.ok(Math.hypot(geometry.control2.x, geometry.control2.y) < 360);
+  // The source's child connector is horizontal. Leave from a separate port.
+  const source = layout.boxes.alpha, child = layout.boxes.detail;
+  const connectorY = source.y + source.height / 2;
+  assert.ok(samples(geometry).every(point => point.x < source.x + source.width || point.x > child.x || Math.abs(point.y - connectorY) > 5));
+});
+
+test('automatic routes stay clear of a midpoint sibling and an occupied right column', () => {
+  const boxes = {
+    a: box('a', 200, 0, 150), b: box('b', 200, 180, 150),
+    middle: box('middle', 200, 90, 150), right: box('right', 400, 30, 360, 210),
+  };
+  const geometry = relationshipGeometry({ ...relation, text: '联系说明' }, boxes);
+  assertClearNodes(geometry, boxes);
+  assert.ok(geometry.label.x + geometry.label.width < boxes.a.x, 'use the available left side instead of crossing the occupied column');
+});
+
+test('crowded columns prefer a clear outer corridor and retain deterministic controls', () => {
+  const boxes = { a: box('a', 280, 70, 150), b: box('b', 650, 270, 150) };
+  for (let column = 0; column < 4; column++) for (let row = 0; row < 4; row++) {
+    if ((column === 1 && row === 0) || (column === 2 && row === 2)) continue;
+    const id = `obstacle-${column}-${row}`;
+    const candidate = box(id, 80 + column * 200, 40 + row * 100, 140, 45);
+    if (!overlap(candidate, boxes.a) && !overlap(candidate, boxes.b)) boxes[id] = candidate;
+  }
+  const first = relationshipGeometry({ ...relation, text: '跨列联系' }, boxes);
+  const second = relationshipGeometry({ ...relation, text: '跨列联系' }, structuredClone(boxes));
+  assertClearNodes(first, boxes);
+  assert.equal(first.path, second.path);
+});
+
+test('existing relationship curves and captions influence new automatic routes', () => {
+  const boxes = { a: box('a', 0, 0), b: box('b', 0, 200) };
+  const first = { ...relation, text: '已经存在的联系' };
+  const next = { id: 'return', sourceId: 'b', targetId: 'a', text: '另一条联系' };
+  const context = { relationships: [first, next] };
+  const before = relationshipGeometry(first, boxes, undefined, context);
+  const after = relationshipGeometry(next, boxes, undefined, context);
+  assertClearNodes(before, boxes); assertClearNodes(after, boxes);
+  assert.ok(!overlap(before.label, after.label), 'captions should occupy different clear space');
+  assert.ok(samples(after).every(point => !inside(point, before.label)), 'new curve must not pass through the earlier caption');
+  assert.notEqual(after.path, relationshipGeometry(next, boxes).path, 'prior relationships must participate in routing');
+});
+
+test('one- and two-line typing preserve automatic controls while the label grows', () => {
+  const doc = treeFixture(), layout = layoutTree(doc);
+  const base = { ...doc.relationships[0], text: '' };
+  let path;
+  for (const text of ['', '联系', 'Relationship', '联系\nRelationship']) {
+    const relationship = { ...base, text };
+    const context = { ...doc, relationships: [relationship] };
+    const geometry = relationshipGeometry(relationship, layout.boxes, undefined, context);
+    path ??= geometry.path;
+    assert.equal(geometry.path, path);
+    assertClearNodes(geometry, layout.boxes);
+  }
+});
+
+test('manual controls remain exact even when they cross an obstacle or another relationship', () => {
+  const doc = treeFixture(), layout = layoutTree(doc);
+  const manual = { ...doc.relationships[0], control1: { x: 140, y: 0 }, control2: { x: 140, y: 0 } };
+  const geometry = relationshipGeometry(manual, layout.boxes, undefined, { ...doc, relationships: [manual] });
+  assert.deepEqual(geometry.control1, manual.control1); assert.deepEqual(geometry.control2, manual.control2);
+  assert.equal(geometry.path, relationshipGeometry(manual, layout.boxes).path);
 });

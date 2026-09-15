@@ -92,9 +92,9 @@ Additional interaction suites are available through the `test:*` scripts in `pac
 
 ## 字体 / Fonts
 
-在文件菜单的“字体”中切换衬线体或 NeverMind，整款应用同步切换并记住选择。PDF 保留所选字体，Mermaid 字体仍由 Obsidian 决定。
+点击明暗模式旁的字体图标，在衬线体和无衬线体之间切换，整款应用同步切换并记住选择。无衬线体使用 NeverMind 搭配本机中文字体。PDF 保留所选字体，Mermaid 字体仍由 Obsidian 决定。
 
-Choose the original serif fonts or NeverMind in File → Font. The choice applies across the app and persists. PDF keeps the selected font; Mermaid follows Obsidian's font settings.
+Click the font icon beside the light/dark toggle to switch between serif and sans-serif fonts across the app. Sans-serif uses NeverMind with a local Chinese font. The choice persists. PDF keeps the selected font; Mermaid follows Obsidian's font settings.
 
 英文使用随附的 URW Classico；中文优先使用本机安装的 PMingLiU，缺少时回退到系统衬线字体。PMingLiU 不随应用分发。
 

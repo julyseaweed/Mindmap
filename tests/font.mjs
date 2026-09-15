@@ -75,11 +75,10 @@ const close = async () => {
   app = null;
 };
 const switchFont = async font => {
-  if (!await page.locator('.file-menu').count()) await page.getByRole('button', { name: '文件菜单', exact: true }).click();
-  await page.getByRole('combobox', { name: '字体', exact: true }).selectOption(font);
+  if (await page.locator('html').getAttribute('data-font') === font) return;
+  await page.getByRole('button', { name: font === 'nevermind' ? '切换到无衬线体' : '切换到衬线体', exact: true }).click();
   await page.waitForFunction(expected => document.documentElement.dataset.font === expected, font);
-  await eventually(async () => await page.getByRole('combobox', { name: '字体', exact: true }).isEnabled(), '字体切换未完成');
-  await page.getByRole('button', { name: '文件菜单', exact: true }).click();
+  await eventually(async () => await page.locator('.titlebar .font-toggle').isEnabled(), '字体切换未完成');
 };
 const mermaid = async () => {
   await app.evaluate(({ clipboard }) => { globalThis.__fontCopy = clipboard.writeText; clipboard.writeText = text => { globalThis.__fontText = text; }; });
@@ -105,11 +104,20 @@ const noClipping = async () => {
 try {
   await launch();
   assert.equal(await page.locator('html').getAttribute('data-font'), 'serif');
+  const fontToggle = page.locator('.titlebar .font-toggle');
+  assert.equal(await fontToggle.getAttribute('aria-label'), '切换到无衬线体');
+  assert.equal(await fontToggle.evaluate(element => element.previousElementSibling?.classList.contains('theme-toggle') || element.nextElementSibling?.classList.contains('theme-toggle')), true, '字体图标应与日夜模式切换相邻');
+  assert.equal(await fontToggle.innerText(), '', '字体切换应只显示图标');
+  assert.equal(await fontToggle.locator('svg').count(), 1);
+  await page.getByRole('button', { name: '文件菜单', exact: true }).click();
+  assert.equal(await page.locator('.file-menu select, .file-menu .font-menu-field').count(), 0, '文件菜单不再放置字体选择');
+  await page.getByRole('button', { name: '文件菜单', exact: true }).click();
   const originalMermaid = await mermaid();
   await noClipping();
 
   stage = 'switch every visible app surface to NeverMind';
   await switchFont('nevermind');
+  assert.equal(await fontToggle.getAttribute('aria-label'), '切换到衬线体');
   const selectors = ['.brand > span', '.document-title', '.library-header > span', '.library-entry > span:last-child', '.canvas .mind-node', '.relationship-label-text'];
   for (const selector of selectors) {
     const element = page.locator(selector).first();
@@ -146,15 +154,50 @@ try {
   assert.equal(await mermaid(), originalMermaid, '字体设置不能写进 Mermaid');
   assert.equal(await fs.readFile(file, 'utf8'), initialBytes, '字体选择不能改写导图内容');
 
-  stage = 'native font selector keys do not edit the selected node';
-  await page.getByRole('button', { name: '文件菜单', exact: true }).click();
-  const select = page.getByRole('combobox', { name: '字体', exact: true });
-  await select.focus();
-  await select.evaluate(element => element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true })));
-  await select.evaluate(element => element.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true })));
+  stage = 'font icon keyboard activation does not edit the selected map';
+  await page.locator('.canvas [data-node-id="alpha"]').click();
+  await fontToggle.focus();
+  await fontToggle.press('Delete');
   assert.equal(await page.locator('.canvas [data-node-id="alpha"]').count(), 1);
+  await page.locator('.canvas [data-node-id="root"]').click();
+  await fontToggle.focus();
+  await fontToggle.press('Enter');
+  await page.waitForFunction(() => document.documentElement.dataset.font === 'serif');
+  await eventually(async () => await fontToggle.isEnabled(), '键盘切换衬线体未完成');
+  assert.equal(await fontToggle.getAttribute('aria-label'), '切换到无衬线体');
+  await fontToggle.press('Space');
+  await page.waitForFunction(() => document.documentElement.dataset.font === 'nevermind');
+  await eventually(async () => await fontToggle.isEnabled(), '键盘切换无衬线体未完成');
+  assert.equal(await page.locator('.canvas .mind-node').count(), Object.keys(original.nodes).length, '字体切换键不能增加或折叠节点');
   assert.equal(await fs.readFile(file, 'utf8'), initialBytes);
-  await page.getByRole('button', { name: '文件菜单', exact: true }).click();
+
+  stage = 'touchpad pinch zoom stays modest and anchored under the pointer';
+  const canvasBox = await page.locator('.canvas').boundingBox();
+  assert.ok(canvasBox);
+  const pointer = { x: Math.round(canvasBox.x + canvasBox.width - 32), y: Math.round(canvasBox.y + 48) };
+  const camera = () => page.locator('.world').evaluate((element, pointer) => {
+    const matrix = new DOMMatrix(getComputedStyle(element).transform);
+    const canvas = element.closest('.canvas').getBoundingClientRect();
+    return { scale: matrix.a, anchorX: (pointer.x - canvas.left - matrix.e) / matrix.a, anchorY: (pointer.y - canvas.top - matrix.f) / matrix.d };
+  }, pointer);
+  const beforePinch = await camera();
+  await page.mouse.move(pointer.x, pointer.y);
+  await page.keyboard.down('Control');
+  try {
+    await page.mouse.wheel(0, -12);
+    await eventually(async () => (await camera()).scale > beforePinch.scale * 1.06, '捏合放大没有响应');
+    const zoomed = await camera();
+    const gain = zoomed.scale / beforePinch.scale;
+    assert.ok(gain > 1.07 && gain < 1.09, `轻微捏合应温和放大约 8%，实际为 ${(gain - 1) * 100}%`);
+    assert.ok(Math.abs(zoomed.anchorX - beforePinch.anchorX) < 0.02 && Math.abs(zoomed.anchorY - beforePinch.anchorY) < 0.02, '捏合时鼠标下的导图位置不能漂移');
+    await page.mouse.wheel(0, 12);
+    await eventually(async () => Math.abs((await camera()).scale - beforePinch.scale) < 0.00001, '反向捏合没有恢复原缩放');
+    const restored = await camera();
+    assert.ok(Math.abs(restored.anchorX - beforePinch.anchorX) < 0.02 && Math.abs(restored.anchorY - beforePinch.anchorY) < 0.02, '往返捏合后画布位置应保持不变');
+  } finally {
+    await page.keyboard.up('Control');
+  }
+  await noClipping();
 
   stage = 'PDF keeps NeverMind on white paper';
   await app.evaluate(({ BrowserWindow, dialog }, target) => {
@@ -200,7 +243,7 @@ try {
   assert.equal(await fs.readFile(file, 'utf8'), initialBytes);
   assert.equal(await page.locator('.app-error, .save-error, .toast').count(), 0);
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ success: true, home, pdf, actualFonts, checks: ['all app surfaces', 'actual NeverMind and Chinese glyphs', 'editor and display clipping', 'zoom', 'native select key boundaries', 'white PDF font', 'reopen persistence', 'restore original', 'map bytes and Mermaid unchanged'] }, null, 2));
+  console.log(JSON.stringify({ success: true, home, pdf, actualFonts, checks: ['adjacent font and theme icons', 'parallel serif and sans-serif labels', 'all app surfaces', 'actual NeverMind and Chinese glyphs', 'editor and display clipping', 'zoom', 'native icon keyboard activation without map changes', 'modest pointer-anchored pinch and reverse', 'white PDF font', 'reopen persistence', 'restore original', 'map bytes and Mermaid unchanged'] }, null, 2));
 } catch (error) {
   console.error(`Font test failed at: ${stage}`, error);
   console.error(JSON.stringify({ home, pdf }));

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
-import { ArrowDown, ArrowRight, ArrowUp, ChevronDown, ChevronRight, Copy, Scissors, ClipboardPaste, FilePlus2, FolderOpen, ListTree, Maximize, Minus, MoreHorizontal, PanelLeft, Plus, Redo2, Save, Search, Undo2, X, Download, Folder, CornerDownRight, Trash2, ChevronsUpDown, Keyboard, Moon, Sun, Spline, Pencil, Type } from 'lucide-react';
+import { ArrowDown, ArrowRight, ArrowUp, ChevronDown, ChevronRight, Copy, Scissors, ClipboardPaste, FilePlus2, FolderOpen, ListTree, Maximize, Minus, MoreHorizontal, PanelLeft, Plus, Redo2, Save, Search, Undo2, X, Download, Folder, CornerDownRight, Trash2, ChevronsUpDown, Keyboard, Moon, Sun, Spline, Pencil, Languages } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import type { Box } from './core.mjs';
@@ -153,7 +153,7 @@ export default function App() {
       ? { ...displayedDoc, nodes: { ...displayedDoc.nodes, [editingNode.id]: { ...editingNode, text: ' ' } } }
       : displayedDoc;
     return layoutTree(source, measure);
-  }, [displayedDoc, edit, measure]);
+  }, [displayedDoc?.nodes, displayedDoc?.columnWidths, displayedDoc?.rootId, edit?.id, measure]);
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
   const visible = useMemo(() => displayedDoc ? visibleNodes(displayedDoc) : [], [displayedDoc]);
@@ -166,12 +166,12 @@ export default function App() {
   const relationshipPreview = useMemo(() => {
     if (!layout || !relationshipSource || !relationshipPointer) return null;
     const targetId = relationshipPointer.targetId;
-    if (targetId && targetId !== relationshipSource) return relationshipGeometry({ id: 'preview', sourceId: relationshipSource, targetId, text: '' }, layout.boxes, measure)?.path;
+    if (targetId && targetId !== relationshipSource) return relationshipGeometry({ id: 'preview', sourceId: relationshipSource, targetId, text: '' }, layout.boxes, measure, displayedDoc ?? undefined)?.path;
     const source = layout.boxes[relationshipSource];
     if (!source) return null;
     const x = source.x + source.width, y = source.y + source.height / 2;
     return `M${x},${y} Q${(x + relationshipPointer.x) / 2},${Math.min(y, relationshipPointer.y) - 60} ${relationshipPointer.x},${relationshipPointer.y}`;
-  }, [layout, relationshipSource, relationshipPointer, measure]);
+  }, [layout, relationshipSource, relationshipPointer, measure, displayedDoc]);
   const matches = useMemo(() => doc && query.trim() ? Object.values(doc.nodes).filter(node => node.text.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())) : [], [doc, query]);
 
   const clearError = useCallback((source?: 'save' | 'other') => {
@@ -613,7 +613,7 @@ export default function App() {
     const rect = canvas.current?.getBoundingClientRect();
     if (!graph || !rect) return;
     if (mediaGesture.current) return;
-    const bounds = relationshipBounds(graph, docRef.current?.relationships ?? [], measure);
+    const bounds = relationshipBounds(graph, docRef.current?.relationships ?? [], measure, docRef.current ?? undefined);
     const scale = Math.max(0.05, Math.min(1, (rect.width - 130) / bounds.width, (rect.height - 170) / bounds.height));
     updateView({ scale, x: (rect.width - bounds.width * scale) / 2 - bounds.x * scale, y: (rect.height - bounds.height * scale) / 2 - bounds.y * scale - 8 });
   }, [updateView, measure]);
@@ -794,7 +794,7 @@ export default function App() {
       const world = canvas.current?.querySelector<HTMLElement>('.world');
       const currentLayout = layoutRef.current;
       if (!world || !currentLayout) throw new Error('暂时无法读取导图，请重试。');
-      prepared = preparePdfExport(world, relationshipBounds(currentLayout, docRef.current.relationships ?? [], measure), docRef.current.title);
+      prepared = preparePdfExport(world, relationshipBounds(currentLayout, docRef.current.relationships ?? [], measure, docRef.current), docRef.current.title);
       await Promise.all(Array.from(document.querySelectorAll<HTMLImageElement>('#pdf-export img')).map(image => image.decode()));
       await api.exportPdf({ width: prepared.width, height: prepared.height, title: docRef.current.title });
     } catch (error) {
@@ -853,7 +853,7 @@ export default function App() {
       }
       if (needsReveal.current || relationshipEditRef.current) {
         const relationship = docRef.current?.relationships?.find(item => item.id === relationshipEditRef.current?.id);
-        const box = relationship ? relationshipGeometry(relationship, layout.boxes, measure)?.label : layout.boxes[selectedRef.current];
+        const box = relationship ? relationshipGeometry(relationship, layout.boxes, measure, docRef.current ?? undefined)?.label : layout.boxes[selectedRef.current];
         if (box) {
           const left = box.x * next.scale + next.x, top = box.y * next.scale + next.y;
           const right = left + box.width * next.scale, bottom = top + box.height * next.scale;
@@ -866,7 +866,7 @@ export default function App() {
       }
       updateView(next);
     }
-  }, [layout, selected, relationshipEdit, size, fit, updateView, measure]);
+  }, [layout, selected, relationshipEdit, doc?.relationships, size, fit, updateView, measure]);
 
   useLayoutEffect(() => { if (edit && editor.current) { editor.current.focus(); editor.current.select(); } }, [edit]);
   useLayoutEffect(() => { if (renaming) { renameRef.current?.focus(); renameRef.current?.select(); } }, [renaming]);
@@ -879,7 +879,7 @@ export default function App() {
       event.preventDefault();
       if (!docRef.current || drag.current?.active || mediaGesture.current) return;
       const rect = element.getBoundingClientRect();
-      if (event.ctrlKey || event.metaKey) zoom(Math.exp(-event.deltaY * 0.005), { x: event.clientX - rect.left, y: event.clientY - rect.top });
+      if (event.ctrlKey || event.metaKey) zoom(Math.exp(-event.deltaY * 0.00625), { x: event.clientX - rect.left, y: event.clientY - rect.top });
       else updateView(v => ({ ...v, x: v.x - (event.shiftKey ? event.deltaY : event.deltaX), y: v.y - (event.shiftKey ? 0 : event.deltaY) }));
     };
     element.addEventListener('wheel', wheel, { passive: false });
@@ -1071,10 +1071,16 @@ export default function App() {
   }}>
     <header className="titlebar">
       <div className="brand"><Logo/><span>Mindmap</span></div>
-      <button type="button" className="icon-button theme-toggle" aria-label={theme === 'light' ? '切换到深色模式' : '切换到浅色模式'} title={theme === 'light' ? '切换到深色模式' : '切换到浅色模式'} disabled={themeBusy}
-        onPointerDown={event => event.preventDefault()} onKeyDown={event => event.stopPropagation()} onClick={() => void toggleTheme()}>
-        {theme === 'light' ? <Moon size={17} strokeWidth={1.5}/> : <Sun size={17} strokeWidth={1.5}/>}
-      </button>
+      <div className="appearance-controls">
+        <button type="button" className="icon-button font-toggle" aria-label={font === 'serif' ? '切换到无衬线体' : '切换到衬线体'} title={font === 'serif' ? '切换到无衬线体' : '切换到衬线体'} disabled={fontBusy || busy}
+          onPointerDown={event => event.preventDefault()} onKeyDown={event => event.stopPropagation()} onClick={() => void changeFont(font === 'serif' ? 'nevermind' : 'serif')}>
+          <Languages size={17} strokeWidth={1.5}/>
+        </button>
+        <button type="button" className="icon-button theme-toggle" aria-label={theme === 'light' ? '切换到深色模式' : '切换到浅色模式'} title={theme === 'light' ? '切换到深色模式' : '切换到浅色模式'} disabled={themeBusy}
+          onPointerDown={event => event.preventDefault()} onKeyDown={event => event.stopPropagation()} onClick={() => void toggleTheme()}>
+          {theme === 'light' ? <Moon size={17} strokeWidth={1.5}/> : <Sun size={17} strokeWidth={1.5}/>}
+        </button>
+      </div>
     </header>
     <header className="toolbar">
       <div className="file-section">
@@ -1155,7 +1161,7 @@ export default function App() {
               return <path key={id} data-edge-to={id} data-preview-parent={destinationParent ?? undefined} opacity={draggedNodes.has(id) ? .7 : 1} strokeDasharray={id === dragId ? '4 4' : undefined} d={`M${x1} ${y1} C${x1 + bend} ${y1},${x2 - bend} ${y2},${x2} ${y2}`} fill="none" stroke="var(--node-ink)" strokeWidth="1" markerEnd="url(#arrow)"/>;
             }))}
           </svg>
-          <RelationshipLayer key={session.token} relationships={doc.relationships ?? []} boxes={relationshipBoxes} measure={measure} scale={view.scale}
+          <RelationshipLayer key={session.token} relationships={doc.relationships ?? []} boxes={relationshipBoxes} context={displayedDoc ?? undefined} measure={measure} scale={view.scale}
             selectedId={selectedRelationship} editingId={relationshipEdit?.id ?? null} disabled={busy || !!dragId || !!mediaPreview || !!relationshipSource}
             onSelect={id => { finishEdit(); selectRelationship(id); }} onEdit={editRelationship}
             onTextChange={updateRelationshipText} onFinishEdit={finishEdit} onCancelEdit={cancelRelationshipEdit}
@@ -1256,7 +1262,6 @@ export default function App() {
       <button disabled={!doc} onClick={() => void exportFile()}><Download size={16}/><span>导出为 Markdown</span></button>
       <button disabled={!doc || fontBusy} onClick={() => void exportPdf()}><Download size={16}/><span>导出为 PDF</span></button>
       <button onClick={() => { setMenu(false); void api?.reveal(); }}><Folder size={16}/><span>在文件夹中显示</span></button>
-      <label className="font-menu-field"><Type size={16}/><span>字体</span><select aria-label="字体" value={font} disabled={fontBusy} onChange={event => void changeFont(event.target.value as AppFont)}><option value="serif">衬线体</option><option value="nevermind">NeverMind</option></select></label>
       <button onClick={() => { setMenu(false); finishEdit(); setHelp(true); }}><Keyboard size={16}/><span>快捷键</span></button>
     </div>}
     {context && doc && <div ref={contextElement} className="popover context-menu" style={{ left: context.x, top: context.y }}>

@@ -47,6 +47,32 @@ const saved = async predicate => {
   assert.equal(await page.locator('.app-error, .save-error').count(), 0);
 };
 const fit = () => page.getByRole('button', { name: '适应画布 (Ctrl + 0)', exact: true }).click();
+const framelessEditor = async () => {
+  const appearance = await page.locator('.relationship-editor').evaluate(editor => {
+    const label = editor.closest('.relationship-label');
+    const editorStyle = getComputedStyle(editor);
+    return {
+      focused: document.activeElement === editor,
+      color: editorStyle.color,
+      caret: editorStyle.caretColor,
+      background: getComputedStyle(label).backgroundColor,
+      paper: getComputedStyle(document.querySelector('.canvas')).backgroundColor,
+      surfaces: [label, editor].map(element => {
+        const style = getComputedStyle(element);
+        return { outline: style.outlineStyle, shadow: style.boxShadow, borders: [style.borderTopWidth, style.borderRightWidth, style.borderBottomWidth, style.borderLeftWidth] };
+      }),
+    };
+  });
+  assert.equal(appearance.focused, true, '无框编辑仍应有输入焦点');
+  assert.equal(appearance.caret, appearance.color, '光标应随文字颜色适应主题');
+  assert.notEqual(appearance.caret, appearance.background);
+  assert.equal(appearance.background, appearance.paper, '编辑时文字区域也应遮住虚线');
+  for (const surface of appearance.surfaces) {
+    assert.equal(surface.outline, 'none', '联系文字编辑时不能显示轮廓框');
+    assert.equal(surface.shadow, 'none', '联系文字编辑时不能显示阴影框');
+    assert.deepEqual(surface.borders, ['0px', '0px', '0px', '0px'], '联系文字编辑时不能显示边框');
+  }
+};
 const capture = async name => {
   let timer;
   try {
@@ -121,6 +147,7 @@ try {
   await editor.waitFor();
   assert.equal(await editor.inputValue(), '');
   assert.equal(await editor.evaluate(element => document.activeElement === element), true);
+  await framelessEditor();
   const text = '观察支持推论\nEvidence supports the conclusion';
   await editor.fill(text);
   await editor.press('Enter');
@@ -132,6 +159,28 @@ try {
   assert.equal(await lines().count(), 1);
   assert.equal((await label().innerText()).replace(/\s/g, ''), text.replace(/\s/g, ''));
   assert.notEqual(await lines().evaluate(element => getComputedStyle(element).strokeDasharray), 'none');
+
+  stage = 'default relationship route and label avoid existing nodes';
+  const routeCollisions = await page.locator('.canvas').evaluate(canvas => {
+    const line = canvas.querySelector('.relationship-line');
+    const transform = line.getScreenCTM();
+    const length = line.getTotalLength();
+    const nodes = [...canvas.querySelectorAll('.mind-node')].map(element => ({ id: element.getAttribute('data-node-id'), box: element.getBoundingClientRect() }));
+    const crossed = new Set();
+    for (let distance = 2; distance < length - 2; distance += 2) {
+      const point = line.getPointAtLength(distance).matrixTransform(transform);
+      for (const { id, box } of nodes) {
+        if (point.x > box.left + 0.5 && point.x < box.right - 0.5 && point.y > box.top + 0.5 && point.y < box.bottom - 0.5) crossed.add(id);
+      }
+    }
+    const label = canvas.querySelector('.relationship-label').getBoundingClientRect();
+    return {
+      crossedNodes: [...crossed],
+      labelOverlaps: nodes.filter(({ box }) => label.left < box.right - 0.5 && label.right > box.left + 0.5 && label.top < box.bottom - 0.5 && label.bottom > box.top + 0.5).map(({ id }) => id),
+    };
+  });
+  assert.deepEqual(routeCollisions.crossedNodes, [], '自动联系线应绕开节点，包括右侧已有子节点');
+  assert.deepEqual(routeCollisions.labelOverlaps, [], '自动联系文字应放在节点之外');
 
   stage = 'light and dark labels stay horizontal and cover the line';
   for (const theme of ['light', 'dark']) {
@@ -151,6 +200,11 @@ try {
     assert.equal(appearance.weight, '400');
     assert.equal(appearance.rotated, false);
     assert.equal(appearance.clipped, false);
+    await label().dblclick();
+    await framelessEditor();
+    assert.equal(await editor.inputValue(), text);
+    await editor.press('Escape');
+    await saved(doc => doc.relationships?.[0].text === text);
   }
   await capture('relationships-dark.png');
 
@@ -281,7 +335,7 @@ try {
   await mermaidPage.close();
   assert.equal(await page.locator('.app-error, .save-error, .toast').count(), 0);
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ success: true, home, pdf, checks: ['create and cancel', 'horizontal multiline label and paper gap in both themes', 'two draggable controls', 'drag and edit cancellation', 'one-step undo and redo', 'save and reopen shape', 'white PDF without controls or clipping', 'delete relationship independently', 'endpoint removal and undo'] }, null, 2));
+  console.log(JSON.stringify({ success: true, home, pdf, checks: ['create and cancel', 'automatic route and label clear existing nodes', 'frameless focused editing in both themes', 'horizontal multiline label and paper gap in both themes', 'two draggable controls', 'drag and edit cancellation', 'one-step undo and redo', 'save and reopen shape', 'white PDF without controls or clipping', 'delete relationship independently', 'endpoint removal and undo'] }, null, 2));
 } catch (error) {
   console.error(`Relationship test failed at: ${stage}`, error);
   console.error(JSON.stringify({ home, pdf }));
