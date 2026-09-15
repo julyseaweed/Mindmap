@@ -10,6 +10,8 @@ A minimal, local-first mind map editor for Windows. Organize ideas with your key
   Left-to-right layout, aligned columns, thin borders, curved arrows, and light/dark themes.
 - 快捷键编辑、分支拖动、折叠、搜索、撤销与重做。
   Keyboard editing, branch dragging, folding, search, undo, and redo.
+- 节点之间可添加虚线联系，拖动曲线、输入横向联系文字。
+  Connect nodes with adjustable dashed curves and horizontal relationship labels.
 - 粘贴图片、按比例缩放、调整整列宽度；支持跨导图复制节点和图片。
   Paste and resize images, adjust column widths, and copy nodes or images between maps.
 - 文件夹导图库与大纲侧栏，可拖动排序、移动和重命名。
@@ -45,9 +47,9 @@ Or open this repository in Codex and use this prompt:
 
 ## 本地文件 / Local files
 
-无需账户，应用可离线使用。导图自动保存为 `.mindmap` 文件，文字、结构、图片和列宽保存在同一个文件中。
+无需账户，应用可离线使用。导图自动保存为 `.mindmap` 文件，文字、结构、图片、列宽和联系保存在同一个文件中。
 
-No account is required, and the app works offline. Maps autosave as self-contained `.mindmap` files containing text, structure, images, and column widths.
+No account is required, and the app works offline. Maps autosave as self-contained `.mindmap` files containing text, structure, images, column widths, and relationships.
 
 本仓库不包含个人导图。 This repository does not include personal maps.
 
@@ -62,7 +64,7 @@ No account is required, and the app works offline. Maps autosave as self-contain
 
 | 格式 / Format | 内容 / Content |
 | --- | --- |
-| Mermaid / Markdown | 全部文字与树结构，包含折叠分支；不含图片。All text and structure, including folded branches; images are omitted. |
+| Mermaid / Markdown | 全部文字、树结构和虚线联系，包含折叠分支；不含图片和手调曲线形状。All text, structure, and dashed relationships, including folded branches; images and custom curve shapes are omitted. |
 | PDF | 当前展开的完整导图，含图片，白底；不受画布缩放或平移影响。The complete expanded map with images, on white paper, independent of canvas zoom or pan. |
 
 Mermaid 使用 `flowchart LR`，不指定字体；Obsidian 会按自身主题和 Mermaid 配置重新布局。
@@ -90,6 +92,10 @@ Additional interaction suites are available through the `test:*` scripts in `pac
 
 ## 字体 / Fonts
 
+在文件菜单的“字体”中切换衬线体或 NeverMind，整款应用同步切换并记住选择。PDF 保留所选字体，Mermaid 字体仍由 Obsidian 决定。
+
+Choose the original serif fonts or NeverMind in File → Font. The choice applies across the app and persists. PDF keeps the selected font; Mermaid follows Obsidian's font settings.
+
 英文使用随附的 URW Classico；中文优先使用本机安装的 PMingLiU，缺少时回退到系统衬线字体。PMingLiU 不随应用分发。
 
 URW Classico is bundled for Latin text. Chinese text uses locally installed PMingLiU when available, with a system serif fallback. PMingLiU is not distributed with the app.
@@ -100,6 +106,8 @@ URW Classico © 2000, 2013 (URW)++ Design & Development. Its upstream notice per
 
 详见 / See [font notice](assets/fonts/classico-README.txt) and [Aladdin Free Public License](assets/fonts/AFPL.htm).
 
-当前支持树形导图；暂不支持 Mermaid 导入、XMind 文件或跨分支关系线。
+NeverMind 由 Xmind 设计，以 SIL OFL 1.1 许可随附；中文搭配本机微软雅黑或系统无衬线字体。详见 [许可](assets/fonts/NeverMind-LICENSE.txt) 与 [来源](assets/fonts/NeverMind-SOURCE.txt)。
 
-Currently limited to tree-shaped maps; Mermaid import, XMind files, and cross-branch relationship lines are not supported.
+NeverMind is designed by Xmind and bundled under SIL OFL 1.1. Chinese uses locally installed Microsoft YaHei or a system sans-serif fallback. See the [license](assets/fonts/NeverMind-LICENSE.txt) and [source](assets/fonts/NeverMind-SOURCE.txt).
+
+暂不支持 Mermaid 导入或 XMind 文件。 Mermaid import and XMind files are not supported.

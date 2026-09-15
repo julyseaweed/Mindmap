@@ -9,12 +9,18 @@ export const NODE_STYLE = Object.freeze({
   insetX: 2 * (nodeStyle.paddingX + nodeStyle.borderWidth),
   insetY: 2 * (nodeStyle.paddingY + nodeStyle.borderWidth),
 });
+const cloneRelationship = relationship => ({
+  ...relationship,
+  ...(relationship.control1 ? { control1: { ...relationship.control1 } } : {}),
+  ...(relationship.control2 ? { control2: { ...relationship.control2 } } : {}),
+});
 export const clone = value => {
   if (value?.format !== FORMAT || value.version !== 1 || !value.nodes || typeof value.nodes !== 'object' || Array.isArray(value.nodes)) return structuredClone(value);
   // Document fields are primitives apart from these containers; share immutable image strings.
   return { ...value, nodes: Object.fromEntries(Object.entries(value.nodes).map(([id, node]) => [id, {
     ...node, children: [...node.children], ...(node.images ? { images: node.images.map(image => ({ ...image })) } : {}),
-  }])), ...(value.columnWidths ? { columnWidths: { ...value.columnWidths } } : {}) };
+  }])), ...(value.columnWidths ? { columnWidths: { ...value.columnWidths } } : {}),
+    ...(value.relationships ? { relationships: value.relationships.map(cloneRelationship) } : {}) };
 };
 export const uid = () => 'n' + crypto.randomUUID().replaceAll('-', '');
 
@@ -93,6 +99,27 @@ export function validateDocument(value) {
     }
     validated.columnWidths = columnWidths;
   }
+  if (Object.hasOwn(value, 'relationships')) {
+    if (!Array.isArray(value.relationships) || value.relationships.length > 2000) fail();
+    const relationshipIds = new Set(), pairs = new Set();
+    validated.relationships = value.relationships.map(relationship => {
+      if (!relationship || typeof relationship.id !== 'string' || !/^[a-zA-Z][\w-]{0,79}$/.test(relationship.id) || ['constructor', 'prototype'].includes(relationship.id) || relationshipIds.has(relationship.id)) fail();
+      if (typeof relationship.sourceId !== 'string' || typeof relationship.targetId !== 'string' || relationship.sourceId === relationship.targetId || !Object.hasOwn(nodes, relationship.sourceId) || !Object.hasOwn(nodes, relationship.targetId)) fail();
+      if (typeof relationship.text !== 'string' || relationship.text.length > 8000) fail();
+      const pair = `${relationship.sourceId}:${relationship.targetId}`;
+      if (pairs.has(pair)) fail();
+      relationshipIds.add(relationship.id);
+      pairs.add(pair);
+      const result = { id: relationship.id, sourceId: relationship.sourceId, targetId: relationship.targetId, text: relationship.text };
+      for (const key of ['control1', 'control2']) {
+        if (!Object.hasOwn(relationship, key)) continue;
+        const point = relationship[key];
+        if (!point || typeof point !== 'object' || Array.isArray(point) || !Number.isFinite(point.x) || !Number.isFinite(point.y) || Math.abs(point.x) > 100000 || Math.abs(point.y) > 100000) fail();
+        result[key] = { x: point.x, y: point.y };
+      }
+      return result;
+    });
+  }
   return validated;
 }
 
@@ -133,6 +160,7 @@ export function copyBranch(doc, id) {
     rootId: id,
     nodes: Object.fromEntries([...depths.keys()].map(nodeId => [nodeId, source.nodes[nodeId]])),
   };
+  if (source.relationships) branch.relationships = source.relationships.filter(relationship => depths.has(relationship.sourceId) && depths.has(relationship.targetId));
   if (source.columnWidths) {
     const maxDepth = Math.max(...depths.values());
     const widths = Object.entries(source.columnWidths)
@@ -150,7 +178,7 @@ export function pasteBranch(doc, targetId, branch) {
   try { source = validateDocument(branch); }
   catch { throw new Error('无法粘贴：复制的节点内容无效或已超过容量上限。'); }
   if (!Object.hasOwn(next.nodes, targetId)) throw new Error('请选择要粘贴到的节点。');
-  const capacityError = () => new Error('无法粘贴：已超过导图的节点、层级或图片容量上限。');
+  const capacityError = () => new Error('无法粘贴：已超过导图的节点、层级、图片或联系容量上限。');
   const targetDepth = branchDepths(next).get(targetId) + 1;
   const sourceDepths = branchDepths(source);
   const maxSourceDepth = Math.max(...sourceDepths.values());
@@ -159,6 +187,7 @@ export function pasteBranch(doc, targetId, branch) {
   // Exclude original IDs too, so copying into another document always creates a new identity.
   const usedIds = new Set();
   for (const document of [next, source]) {
+    for (const relationship of document.relationships ?? []) usedIds.add(relationship.id);
     for (const node of Object.values(document.nodes)) {
       usedIds.add(node.id);
       for (const image of node.images ?? []) usedIds.add(image.id);
@@ -181,6 +210,12 @@ export function pasteBranch(doc, targetId, branch) {
   const selectedId = ids.get(source.rootId);
   next.nodes[targetId].children.push(selectedId);
   next.nodes[targetId].collapsed = false;
+  if (source.relationships?.length) {
+    next.relationships ??= [];
+    next.relationships.push(...source.relationships.map(relationship => ({
+      ...cloneRelationship(relationship), id: freshId(), sourceId: ids.get(relationship.sourceId), targetId: ids.get(relationship.targetId),
+    })));
+  }
   for (const [depth, width] of Object.entries(source.columnWidths ?? {})) {
     if (Number(depth) > maxSourceDepth) continue;
     const destinationDepth = targetDepth + Number(depth);
@@ -205,6 +240,31 @@ export function addNode(doc, selectedId, kind = 'child', text = '') {
   return { doc: validateDocument(next), selectedId: id };
 }
 
+export function addRelationship(doc, sourceId, targetId) {
+  if (sourceId === targetId || !Object.hasOwn(doc.nodes, sourceId) || !Object.hasOwn(doc.nodes, targetId)) throw new Error('请选择两个不同的节点建立联系。');
+  const existing = doc.relationships?.find(relationship => relationship.sourceId === sourceId && relationship.targetId === targetId);
+  if (existing) return { doc, relationshipId: existing.id };
+  if ((doc.relationships?.length ?? 0) >= 2000) throw new Error('已达到导图的联系数量上限。');
+  const next = clone(doc);
+  const usedIds = new Set([...Object.keys(next.nodes), ...(next.relationships ?? []).map(relationship => relationship.id)]);
+  let id;
+  do { id = uid(); } while (usedIds.has(id));
+  next.relationships ??= [];
+  next.relationships.push({ id, sourceId, targetId, text: '' });
+  return { doc: next, relationshipId: id };
+}
+
+export function deleteRelationship(doc, id) {
+  if (!doc.relationships?.some(relationship => relationship.id === id)) return doc;
+  const next = clone(doc);
+  next.relationships = next.relationships.filter(relationship => relationship.id !== id);
+  return next;
+}
+
+const pruneRelationships = doc => {
+  if (doc.relationships) doc.relationships = doc.relationships.filter(relationship => Object.hasOwn(doc.nodes, relationship.sourceId) && Object.hasOwn(doc.nodes, relationship.targetId));
+};
+
 export function deleteNode(doc, id) {
   const parentId = parentOf(doc, id);
   if (!parentId) return { doc, selectedId: id };
@@ -212,6 +272,7 @@ export function deleteNode(doc, id) {
   const index = next.nodes[parentId].children.indexOf(id);
   next.nodes[parentId].children.splice(index, 1);
   for (const child of descendants(next, id)) delete next.nodes[child];
+  pruneRelationships(next);
   return { doc: next, selectedId: next.nodes[parentId].children[Math.max(0, index - 1)] ?? parentId };
 }
 
@@ -224,6 +285,7 @@ export function deleteNodeOnly(doc, id) {
   const index = siblings.indexOf(id);
   siblings.splice(index, 1, ...children);
   delete next.nodes[id];
+  pruneRelationships(next);
   return { doc: next, selectedId: children[0] ?? siblings[Math.max(0, index - 1)] ?? parentId };
 }
 
@@ -274,6 +336,7 @@ export function toMermaid(doc, fenced = true) {
     ...order.map(id => `    ${ids.get(id)}["${escapeMermaid(doc.nodes[id].text || ' ')}"]`),
     '',
     ...order.flatMap(id => doc.nodes[id].children.map(child => `    ${ids.get(id)} --> ${ids.get(child)}`)),
+    ...(doc.relationships ?? []).map(relationship => `    ${ids.get(relationship.sourceId)} -.->${relationship.text ? `|"${escapeMermaid(relationship.text).replaceAll('|', '#124;')}"|` : ''} ${ids.get(relationship.targetId)}`),
     '',
     '    classDef default fill:#ffffff,stroke:#111111,stroke-width:1px,color:#111111',
     '    linkStyle default stroke:#111111,stroke-width:1px',

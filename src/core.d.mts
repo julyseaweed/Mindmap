@@ -14,6 +14,8 @@ export function descendants(doc: MindDocument, id: string): string[];
 export function copyBranch(doc: MindDocument, id: string): MindDocument;
 export function pasteBranch(doc: MindDocument, targetId: string, branch: MindDocument): { doc: MindDocument; selectedId: string };
 export function addNode(doc: MindDocument, selectedId: string, kind?: 'child' | 'sibling', text?: string): { doc: MindDocument; selectedId: string };
+export function addRelationship(doc: MindDocument, sourceId: string, targetId: string): { doc: MindDocument; relationshipId: string };
+export function deleteRelationship(doc: MindDocument, id: string): MindDocument;
 export function deleteNode(doc: MindDocument, id: string): { doc: MindDocument; selectedId: string };
 export function deleteNodeOnly(doc: MindDocument, id: string): { doc: MindDocument; selectedId: string };
 export function moveNode(doc: MindDocument, id: string, targetId: string, position?: 'inside' | 'before' | 'after'): MindDocument;

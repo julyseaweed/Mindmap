@@ -1,6 +1,6 @@
 import './pdf-export.css';
 
-interface PdfExportSize { width: number; height: number }
+interface PdfExportSize { x?: number; y?: number; width: number; height: number }
 interface PreparedPdfExport extends PdfExportSize { dispose(): void }
 
 const margin = 36;
@@ -9,7 +9,8 @@ const maximumPage = 17280;
 let exportSequence = 0;
 
 export function preparePdfExport(world: HTMLElement, size: PdfExportSize, title: string): PreparedPdfExport {
-  if (!world.isConnected || !Number.isFinite(size.width) || !Number.isFinite(size.height) || size.width <= 0 || size.height <= 0) {
+  const x = size.x ?? 0, y = size.y ?? 0;
+  if (!world.isConnected || !Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(size.width) || !Number.isFinite(size.height) || size.width <= 0 || size.height <= 0) {
     throw new Error('导图尺寸无效，暂时无法导出 PDF。');
   }
   const document = world.ownerDocument;
@@ -33,18 +34,24 @@ export function preparePdfExport(world: HTMLElement, size: PdfExportSize, title:
 
     const clone = world.cloneNode(true) as HTMLElement;
     clone.classList.add('pdf-world');
-    clone.style.setProperty('left', `${margin}px`, 'important');
-    clone.style.setProperty('top', `${margin}px`, 'important');
+    clone.style.setProperty('left', `${margin - x * scale}px`, 'important');
+    clone.style.setProperty('top', `${margin - y * scale}px`, 'important');
     clone.style.setProperty('width', `${size.width}px`, 'important');
     clone.style.setProperty('height', `${size.height}px`, 'important');
     clone.style.setProperty('transform', `scale(${scale})`, 'important');
     clone.querySelectorAll('button').forEach(button => button.remove());
     clone.querySelectorAll('.node-resize-handle, .node-image-resizer').forEach(handle => handle.remove());
+    clone.querySelectorAll('.relationship-hit, [data-relationship-control], .relationship-guide, .relationship-handle, .relationship-preview').forEach(control => control.remove());
+    clone.querySelectorAll('[data-relationship-id]').forEach(relationship => {
+      relationship.classList.remove('is-selected', 'is-editing');
+      relationship.removeAttribute('tabindex');
+      relationship.removeAttribute('aria-selected');
+    });
     clone.querySelectorAll('.node-image').forEach(image => { image.classList.remove('is-selected'); image.removeAttribute('tabindex'); });
     const inputValues = Array.from(world.querySelectorAll('textarea'), input => input.value);
     clone.querySelectorAll('textarea').forEach((input, index) => {
       const text = document.createElement('span');
-      text.className = 'node-text pdf-textarea-fallback';
+      text.className = `${input.classList.contains('relationship-editor') ? 'relationship-label-text' : 'node-text'} pdf-textarea-fallback`;
       text.textContent = inputValues[index] ?? input.value;
       input.replaceWith(text);
     });

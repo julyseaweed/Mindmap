@@ -82,6 +82,12 @@ kbd { font-family: var(--font-mono); color: var(--muted); font-size: 10px; font-
 .canvas { flex: 1; position: relative; overflow: hidden; background: var(--paper); touch-action: none; user-select: none; min-width: 0; }
 .canvas.panning { cursor: grabbing; }
 .canvas.dragging, .canvas.dragging * { cursor: grabbing !important; }
+.canvas.adding-relationship, .canvas.adding-relationship .mind-node { cursor: crosshair; }
+.mind-node.relationship-target { outline: 1px dashed var(--node-ink); outline-offset: 5px; }
+.font-menu-field { display: flex; align-items: center; gap: 11px; min-height: 35px; padding: 5px 10px; font-size: 12px; }
+.font-menu-field > svg { flex-shrink: 0; }
+.font-menu-field > span { flex: 1; }
+.font-menu-field select { border: 1px solid var(--line); border-radius: 4px; padding: 4px 6px; max-width: 145px; background: var(--surface); cursor: pointer; }
 .world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
 .connections { position: absolute; top: 0; left: 0; overflow: visible; pointer-events: none; }
 .mind-node { position: absolute; border: var(--node-border-width) solid var(--node-ink); border-radius: 3px; background: var(--paper); color: var(--node-ink); display: flex; align-items: center; justify-content: center; padding: var(--node-padding-y) var(--node-padding-x); cursor: grab; touch-action: none; font-family: var(--font-node); font-size: var(--node-font-size); line-height: var(--node-line-height); }

@@ -1,24 +1,29 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
-import { ArrowDown, ArrowRight, ArrowUp, ChevronDown, ChevronRight, Copy, Scissors, ClipboardPaste, FilePlus2, FolderOpen, ListTree, Maximize, Minus, MoreHorizontal, PanelLeft, Plus, Redo2, Save, Search, Undo2, X, Download, Folder, CornerDownRight, Trash2, ChevronsUpDown, Keyboard, Moon, Sun } from 'lucide-react';
+import { ArrowDown, ArrowRight, ArrowUp, ChevronDown, ChevronRight, Copy, Scissors, ClipboardPaste, FilePlus2, FolderOpen, ListTree, Maximize, Minus, MoreHorizontal, PanelLeft, Plus, Redo2, Save, Search, Undo2, X, Download, Folder, CornerDownRight, Trash2, ChevronsUpDown, Keyboard, Moon, Sun, Spline, Pencil, Type } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import type { Box } from './core.mjs';
-import { NODE_STYLE, addNode, clone, copyBranch as extractBranch, pasteBranch as insertBranch, deleteNode, deleteNodeOnly, descendants, layoutTree, moveNode, parentOf, reorderNode, toMermaid, validateDocument, visibleNodes } from './core.mjs';
-import type { LibraryEntry, LibraryMutation, LibrarySnapshot, MindDocument, NodeImage, Session, Theme, View } from './types';
+import { NODE_STYLE, addNode, addRelationship, deleteRelationship, clone, copyBranch as extractBranch, pasteBranch as insertBranch, deleteNode, deleteNodeOnly, descendants, layoutTree, moveNode, parentOf, reorderNode, toMermaid, validateDocument, visibleNodes } from './core.mjs';
+import type { LibraryEntry, LibraryMutation, LibrarySnapshot, MindDocument, MindRelationship, NodeImage, Session, Theme, View } from './types';
 import { applyTheme } from './theme';
+import { applyFont } from './font';
+import type { AppFont } from './font';
 import { preparePdfExport } from './pdf-export';
 import { readClipboardImage } from './clipboard-image';
 import NodeImageView from './NodeImageView';
 import NodeResizeHandle from './NodeResizeHandle';
 import LibraryPanel from './LibraryPanel';
 import ResizableSidebar from './ResizableSidebar';
+import RelationshipLayer from './RelationshipLayer';
+import { relationshipBounds, relationshipGeometry } from './relationships.mjs';
 import { resolveNodeDrop } from './node-drag.mjs';
 import type { NodeDrop } from './node-drag.mjs';
 import appIcon from '../assets/icon.png';
 
 type Edit = { id: string; base: MindDocument; fresh: boolean };
-type Snapshot = { doc: MindDocument; selected: string };
+type Snapshot = { doc: MindDocument; selected: string; relationship?: string };
+type RelationshipEdit = { id: string; base: MindDocument };
 type NodeDrag = { id: string; pointerId: number; x: number; y: number; active: boolean; view: View; doc: MindDocument; boxes: Record<string, Box> };
 type MediaPreview = { kind: 'column'; depth: number; width: number } | { kind: 'image'; nodeId: string; imageId: string; width: number; height: number };
 const api = window.inkmap;
@@ -47,6 +52,7 @@ const shortcuts = [
   ['Ctrl + N', '新建导图'], ['Ctrl + O', '打开导图'], ['Ctrl + S', '立即保存'],
   ['Ctrl + Shift + S', '另存为'], ['Ctrl + Shift + C', '复制到 Obsidian'], ['Ctrl + F', '查找节点'],
   ['Ctrl + 0', '适应画布'], ['Ctrl + 滚轮', '缩放画布'], ['拖动空白处', '平移画布'],
+  ['双击联系线', '编辑联系文字'], ['拖动联系线 / 控制点', '调整联系曲线'], ['Esc', '取消添加联系或调整曲线'],
 ];
 
 function IconButton({ icon: Icon, label, onClick, disabled, active, className = '' }: { icon: LucideIcon; label: string; onClick?: () => void; disabled?: boolean; active?: boolean; className?: string }) {
@@ -60,6 +66,8 @@ function Logo() {
 export default function App() {
   const [theme, setTheme] = useState<Theme>(() => document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light');
   const [themeBusy, setThemeBusy] = useState(false);
+  const [font, setFont] = useState<AppFont>(() => document.documentElement.dataset.font === 'nevermind' ? 'nevermind' : 'serif');
+  const [fontBusy, setFontBusy] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
   const [doc, setDoc] = useState<MindDocument | null>(null);
   const docRef = useRef<MindDocument | null>(null);
@@ -71,6 +79,12 @@ export default function App() {
   const mediaInitialWidth = useRef(0);
   const pasteQueue = useRef(Promise.resolve());
   const selectedRef = useRef('root');
+  const [selectedRelationship, setSelectedRelationship] = useState<string | null>(null);
+  const selectedRelationshipRef = useRef<string | null>(null);
+  const [relationshipEdit, setRelationshipEdit] = useState<RelationshipEdit | null>(null);
+  const relationshipEditRef = useRef<RelationshipEdit | null>(null);
+  const [relationshipSource, setRelationshipSource] = useState<string | null>(null);
+  const [relationshipPointer, setRelationshipPointer] = useState<{ x: number; y: number; targetId?: string } | null>(null);
   const [edit, setEdit] = useState<Edit | null>(null);
   const editRef = useRef<Edit | null>(null);
   const editor = useRef<HTMLTextAreaElement>(null);
@@ -124,7 +138,7 @@ export default function App() {
     const context = document.createElement('canvas').getContext('2d')!;
     context.font = `${NODE_STYLE.fontSize}px ${getComputedStyle(document.documentElement).getPropertyValue('--font-node').trim()}`;
     return (text: string) => context.measureText(text).width;
-  }, []);
+  }, [font]);
   const displayedDoc = useMemo(() => {
     if (!doc || !mediaPreview) return doc;
     if (mediaPreview.kind === 'column') return { ...doc, columnWidths: { ...doc.columnWidths, [mediaPreview.depth]: mediaPreview.width } };
@@ -144,6 +158,20 @@ export default function App() {
   layoutRef.current = layout;
   const visible = useMemo(() => displayedDoc ? visibleNodes(displayedDoc) : [], [displayedDoc]);
   const draggedNodes = useMemo(() => new Set(dragId && doc?.nodes[dragId] ? descendants(doc, dragId) : []), [dragId, doc]);
+  const relationshipBoxes = useMemo(() => {
+    if (!layout) return {};
+    if (!dragId) return layout.boxes;
+    return Object.fromEntries(Object.entries(layout.boxes).map(([id, box]) => [id, draggedNodes.has(id) ? { ...box, x: box.x + dragOffset.x, y: box.y + dragOffset.y } : box]));
+  }, [layout, dragId, draggedNodes, dragOffset]);
+  const relationshipPreview = useMemo(() => {
+    if (!layout || !relationshipSource || !relationshipPointer) return null;
+    const targetId = relationshipPointer.targetId;
+    if (targetId && targetId !== relationshipSource) return relationshipGeometry({ id: 'preview', sourceId: relationshipSource, targetId, text: '' }, layout.boxes, measure)?.path;
+    const source = layout.boxes[relationshipSource];
+    if (!source) return null;
+    const x = source.x + source.width, y = source.y + source.height / 2;
+    return `M${x},${y} Q${(x + relationshipPointer.x) / 2},${Math.min(y, relationshipPointer.y) - 60} ${relationshipPointer.x},${relationshipPointer.y}`;
+  }, [layout, relationshipSource, relationshipPointer, measure]);
   const matches = useMemo(() => doc && query.trim() ? Object.values(doc.nodes).filter(node => node.text.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())) : [], [doc, query]);
 
   const clearError = useCallback((source?: 'save' | 'other') => {
@@ -172,6 +200,16 @@ export default function App() {
     } catch {
       showError('显示模式未能保存，请重试。');
     } finally { setThemeBusy(false); }
+  };
+
+  const changeFont = async (next: AppFont) => {
+    if (fontBusy || font === next || busyRef.current || mediaGesture.current || drag.current?.active) return;
+    finishEdit(); setFontBusy(true);
+    try {
+      await applyFont(next);
+      rememberAnchor(); setFont(next);
+    } catch { showError('字体未能加载，请重试。'); }
+    finally { setFontBusy(false); }
   };
 
   const selectLibraryPath = useCallback((path: string) => {
@@ -214,6 +252,8 @@ export default function App() {
 
   const select = useCallback((id: string, reveal = true) => {
     setSelectedImage(null);
+    selectedRelationshipRef.current = null; setSelectedRelationship(null);
+    setRelationshipSource(null); setRelationshipPointer(null);
     selectedRef.current = id;
     setSelected(id);
     needsReveal.current = reveal;
@@ -265,7 +305,7 @@ export default function App() {
 
   const syncHistory = () => setHistoryCount({ past: history.current.past.length, future: history.current.future.length });
   const pushHistory = (snapshot: Snapshot) => {
-    history.current.past.push(snapshot);
+    history.current.past.push({ relationship: selectedRelationshipRef.current ?? undefined, ...snapshot });
     if (history.current.past.length > 100) history.current.past.shift();
     history.current.future = [];
     syncHistory();
@@ -285,6 +325,13 @@ export default function App() {
   };
 
   const finishEdit = () => {
+    const relationship = relationshipEditRef.current;
+    if (relationship && docRef.current) {
+      const before = relationship.base.relationships?.find(item => item.id === relationship.id);
+      const after = docRef.current.relationships?.find(item => item.id === relationship.id);
+      if (before && after && before.text !== after.text) pushHistory({ doc: relationship.base, selected: '', relationship: relationship.id });
+    }
+    relationshipEditRef.current = null; setRelationshipEdit(null);
     const current = editRef.current;
     if (!current || !docRef.current) return;
     if (!current.fresh && current.base.nodes[current.id]?.text !== docRef.current.nodes[current.id]?.text) pushHistory({ doc: current.base, selected: current.id });
@@ -448,7 +495,7 @@ export default function App() {
   };
 
   const startEdit = (id = selectedRef.current, fresh = false) => {
-    if (!docRef.current || busyRef.current) return;
+    if (!docRef.current?.nodes[id] || busyRef.current) return;
     finishEdit();
     select(id);
     const editing = { id, base: clone(docRef.current), fresh };
@@ -457,7 +504,7 @@ export default function App() {
   };
 
   const add = (kind: 'child' | 'sibling') => {
-    if (!docRef.current || busyRef.current) return;
+    if (!docRef.current?.nodes[selectedRef.current] || busyRef.current) return;
     finishEdit();
     try {
       const result = addNode(docRef.current, selectedRef.current, kind);
@@ -467,7 +514,7 @@ export default function App() {
   };
 
   const remove = (keepChildren = false) => {
-    if (!docRef.current || selectedRef.current === docRef.current.rootId || busyRef.current || mediaGesture.current || drag.current?.active) return;
+    if (!docRef.current?.nodes[selectedRef.current] || selectedRef.current === docRef.current.rootId || busyRef.current || mediaGesture.current || drag.current?.active) return;
     finishEdit();
     const result = (keepChildren ? deleteNodeOnly : deleteNode)(docRef.current, selectedRef.current);
     apply(result.doc, result.selectedId);
@@ -475,11 +522,70 @@ export default function App() {
   };
 
   const toggle = (id = selectedRef.current) => {
-    if (!docRef.current?.nodes[id].children.length) return;
+    if (!docRef.current?.nodes[id]?.children.length) return;
     finishEdit();
     const next = clone(docRef.current);
     next.nodes[id].collapsed = !next.nodes[id].collapsed;
     apply(next, id);
+  };
+
+  const selectRelationship = (id: string) => {
+    selectedRef.current = ''; setSelected(''); setSelectedImage(null);
+    selectedRelationshipRef.current = id; setSelectedRelationship(id);
+    setRelationshipSource(null); setRelationshipPointer(null);
+    setContext(null); setMenu(false); needsReveal.current = false;
+  };
+
+  const editRelationship = (id: string) => {
+    if (busyRef.current || !docRef.current?.relationships?.some(item => item.id === id)) return;
+    finishEdit(); selectRelationship(id);
+    const editing = { id, base: docRef.current };
+    relationshipEditRef.current = editing; setRelationshipEdit(editing);
+    needsReveal.current = true;
+  };
+
+  const updateRelationshipText = (id: string, text: string) => {
+    const current = docRef.current;
+    if (!current || busyRef.current || relationshipEditRef.current?.id !== id) return;
+    markChanged({ ...current, relationships: current.relationships?.map(item => item.id === id ? { ...item, text } : item) });
+  };
+
+  const cancelRelationshipEdit = () => {
+    const editing = relationshipEditRef.current, current = docRef.current;
+    relationshipEditRef.current = null; setRelationshipEdit(null);
+    const before = editing?.base.relationships?.find(item => item.id === editing.id);
+    if (before && current) markChanged({ ...current, relationships: current.relationships?.map(item => item.id === before.id ? { ...item, text: before.text } : item) });
+  };
+
+  const commitRelationshipControls = (id: string, controls: Pick<MindRelationship, 'control1' | 'control2'>) => {
+    mediaGesture.current = false;
+    const current = docRef.current;
+    if (!current?.relationships?.some(item => item.id === id) || busyRef.current) return;
+    apply({ ...current, relationships: current.relationships.map(item => item.id === id ? { ...item, ...controls } : item) }, '');
+    selectRelationship(id);
+  };
+
+  const removeRelationship = (id = selectedRelationshipRef.current) => {
+    if (!id || !docRef.current || busyRef.current || mediaGesture.current) return;
+    finishEdit();
+    apply(deleteRelationship(docRef.current, id), '');
+  };
+
+  const startRelationship = () => {
+    const id = selectedRef.current;
+    if (busyRef.current || !docRef.current?.nodes[id] || mediaGesture.current) return;
+    finishEdit(); setContext(null); setMenu(false);
+    setRelationshipSource(id); setRelationshipPointer(null);
+  };
+
+  const connectRelationship = (targetId: string) => {
+    if (!relationshipSource || !docRef.current || busyRef.current) return;
+    if (targetId === relationshipSource) return;
+    try {
+      const result = addRelationship(docRef.current, relationshipSource, targetId);
+      apply(result.doc, '');
+      editRelationship(result.relationshipId);
+    } catch (error) { showError((error as Error).message); }
   };
 
   const undo = (redo = false) => {
@@ -493,10 +599,11 @@ export default function App() {
       const to = redo ? history.current.past : history.current.future;
       const snapshot = from.pop();
       if (!snapshot) return;
-      to.push({ doc: docRef.current, selected: selectedRef.current });
+      to.push({ doc: docRef.current, selected: selectedRef.current, relationship: selectedRelationshipRef.current ?? undefined });
       rememberAnchor();
       markChanged(snapshot.doc);
       select(snapshot.selected);
+      if (snapshot.relationship && snapshot.doc.relationships?.some(item => item.id === snapshot.relationship)) selectRelationship(snapshot.relationship);
       syncHistory();
     });
   };
@@ -505,9 +612,11 @@ export default function App() {
     const graph = layoutRef.current;
     const rect = canvas.current?.getBoundingClientRect();
     if (!graph || !rect) return;
-    const scale = Math.max(0.05, Math.min(1, (rect.width - 130) / graph.width, (rect.height - 170) / graph.height));
-    updateView({ scale, x: (rect.width - graph.width * scale) / 2, y: (rect.height - graph.height * scale) / 2 - 8 });
-  }, [updateView]);
+    if (mediaGesture.current) return;
+    const bounds = relationshipBounds(graph, docRef.current?.relationships ?? [], measure);
+    const scale = Math.max(0.05, Math.min(1, (rect.width - 130) / bounds.width, (rect.height - 170) / bounds.height));
+    updateView({ scale, x: (rect.width - bounds.width * scale) / 2 - bounds.x * scale, y: (rect.height - bounds.height * scale) / 2 - bounds.y * scale - 8 });
+  }, [updateView, measure]);
 
   const zoom = (factor: number, point?: { x: number; y: number }) => {
     if (drag.current?.active || mediaGesture.current) return;
@@ -524,6 +633,7 @@ export default function App() {
     clearError();
     failedSave.current = null;
     setMediaPreview(null); setSelectedImage(null); mediaGesture.current = false;
+    relationshipEditRef.current = null; setRelationshipEdit(null);
     if (saveTimer.current) clearTimeout(saveTimer.current);
     sessionRef.current = next;
     docRef.current = next.doc;
@@ -655,7 +765,7 @@ export default function App() {
   };
 
   const exportText = async (destination: 'clipboard' | 'markdown') => {
-    if (!api || !docRef.current || busyRef.current || mediaGesture.current || drag.current?.active) return;
+    if (!api || !docRef.current || busyRef.current || fontBusy || mediaGesture.current || drag.current?.active) return;
     finishEdit(); setMenu(false); setContext(null);
     busyRef.current = true; setBusy(true);
     try {
@@ -672,7 +782,7 @@ export default function App() {
   const exportFile = () => exportText('markdown');
 
   const exportPdf = async () => {
-    if (!api || !docRef.current || busyRef.current || mediaGesture.current || drag.current?.active) return;
+    if (!api || !docRef.current || busyRef.current || fontBusy || mediaGesture.current || drag.current?.active) return;
     busyRef.current = true;
     let prepared: ReturnType<typeof preparePdfExport> | undefined;
     try {
@@ -684,7 +794,7 @@ export default function App() {
       const world = canvas.current?.querySelector<HTMLElement>('.world');
       const currentLayout = layoutRef.current;
       if (!world || !currentLayout) throw new Error('暂时无法读取导图，请重试。');
-      prepared = preparePdfExport(world, currentLayout, docRef.current.title);
+      prepared = preparePdfExport(world, relationshipBounds(currentLayout, docRef.current.relationships ?? [], measure), docRef.current.title);
       await Promise.all(Array.from(document.querySelectorAll<HTMLImageElement>('#pdf-export img')).map(image => image.decode()));
       await api.exportPdf({ width: prepared.width, height: prepared.height, title: docRef.current.title });
     } catch (error) {
@@ -741,8 +851,9 @@ export default function App() {
         if (box) { next.x += (anchor.current.x - box.x) * next.scale; next.y += (anchor.current.y - box.y) * next.scale; }
         anchor.current = null;
       }
-      if (needsReveal.current) {
-        const box = layout.boxes[selectedRef.current];
+      if (needsReveal.current || relationshipEditRef.current) {
+        const relationship = docRef.current?.relationships?.find(item => item.id === relationshipEditRef.current?.id);
+        const box = relationship ? relationshipGeometry(relationship, layout.boxes, measure)?.label : layout.boxes[selectedRef.current];
         if (box) {
           const left = box.x * next.scale + next.x, top = box.y * next.scale + next.y;
           const right = left + box.width * next.scale, bottom = top + box.height * next.scale;
@@ -755,7 +866,7 @@ export default function App() {
       }
       updateView(next);
     }
-  }, [layout, selected, size, fit, updateView]);
+  }, [layout, selected, relationshipEdit, size, fit, updateView, measure]);
 
   useLayoutEffect(() => { if (edit && editor.current) { editor.current.focus(); editor.current.select(); } }, [edit]);
   useLayoutEffect(() => { if (renaming) { renameRef.current?.focus(); renameRef.current?.select(); } }, [renaming]);
@@ -819,14 +930,14 @@ export default function App() {
       if (event.isComposing || event.keyCode === 229 || busyRef.current || mediaGesture.current || drag.current?.active) return;
       const modifier = event.ctrlKey || event.metaKey;
       const key = event.key.toLowerCase();
-      const input = (event.target as HTMLElement).closest('input, textarea, [contenteditable="true"]');
+      const input = (event.target as HTMLElement).closest('input, textarea, select, [contenteditable="true"]');
       if (modifier && key === 's') { event.preventDefault(); if (event.shiftKey) void fileAction('save-as'); else { finishEdit(); void pasteQueue.current.then(() => flush()).catch(() => {}); } return; }
       if (modifier && key === 'o') { event.preventDefault(); void fileAction('open'); return; }
       if (modifier && key === 'n') { event.preventDefault(); void fileAction('new'); return; }
       if (modifier && event.shiftKey && key === 'c') { event.preventDefault(); void copy(); return; }
       if (input) return;
       const mediaTarget = (event.target as HTMLElement).closest('.canvas, .node-image-menu, .outline-panel, .context-menu') || event.target === document.body || event.target === document.documentElement;
-      if (modifier && !event.shiftKey && mediaTarget && !help && !renaming) {
+      if (modifier && !event.shiftKey && mediaTarget && !help && !renaming && selectedRef.current) {
         if (key === 'c' || key === 'x') {
           event.preventDefault();
           if (selectedImage) copyImage(selectedImage.nodeId, selectedImage.imageId, key === 'x');
@@ -838,12 +949,23 @@ export default function App() {
       if (selectedImage && (key === 'delete' || key === 'backspace')) { event.preventDefault(); removeImage(selectedImage.nodeId, selectedImage.imageId); return; }
       if (selectedImage && key === 'escape') { setSelectedImage(null); return; }
       if (help) { if (key === 'escape') setHelp(false); return; }
-      if (key === 'escape') { setMenu(false); setContext(null); setSearchOpen(false); return; }
+      if (key === 'escape') {
+        setMenu(false); setContext(null); setSearchOpen(false);
+        setRelationshipSource(null); setRelationshipPointer(null);
+        if (selectedRelationshipRef.current) select('', false);
+        return;
+      }
       if (!docRef.current) return;
       if (modifier && key === 'f') { event.preventDefault(); setSearchOpen(true); return; }
       if (modifier && key === '0') { event.preventDefault(); fit(); return; }
       if (modifier && (key === '=' || key === '+' || key === '-')) { event.preventDefault(); zoom(key === '-' ? 0.85 : 1.18); return; }
       if (modifier && (key === 'z' || key === 'y')) { event.preventDefault(); undo(key === 'y' || event.shiftKey); return; }
+      if (selectedRelationshipRef.current) {
+        if (key === 'delete' || key === 'backspace') { event.preventDefault(); removeRelationship(); }
+        else if (key === 'f2' || key === 'enter') { event.preventDefault(); editRelationship(selectedRelationshipRef.current); }
+        return;
+      }
+      if (relationshipSource || !docRef.current.nodes[selectedRef.current]) return;
       if (key === 'tab') { event.preventDefault(); add('child'); return; }
       if (key === 'enter') { event.preventDefault(); add('sibling'); return; }
       if (key === 'f2') { event.preventDefault(); startEdit(); return; }
@@ -942,6 +1064,7 @@ export default function App() {
   if (!session) return <main className="loading"><Logo/><span>Mindmap</span></main>;
   const currentNode = doc?.nodes[selected];
   const currentBox = layout?.boxes[selected];
+  const currentRelationship = doc?.relationships?.find(item => item.id === selectedRelationship && layout?.boxes[item.sourceId] && layout.boxes[item.targetId]);
 
   return <div className={`app ${busy ? 'busy' : ''}`} data-save-state={saveState} onKeyDownCapture={event => {
     if (busyRef.current || mediaGesture.current || drag.current?.active) { event.preventDefault(); event.stopPropagation(); }
@@ -965,7 +1088,7 @@ export default function App() {
         </div></>}
       </div>
       <div className="toolbar-actions">
-        <div className="history-buttons"><IconButton icon={Undo2} label="撤销 (Ctrl + Z)" disabled={!historyCount.past && !edit} onClick={() => undo()}/><IconButton icon={Redo2} label="重做 (Ctrl + Shift + Z)" disabled={!historyCount.future} onClick={() => undo(true)}/></div>
+        <div className="history-buttons"><IconButton icon={Undo2} label="撤销 (Ctrl + Z)" disabled={!historyCount.past && !edit && !relationshipEdit} onClick={() => undo()}/><IconButton icon={Redo2} label="重做 (Ctrl + Shift + Z)" disabled={!historyCount.future} onClick={() => undo(true)}/></div>
         <span className="divider optional"/>
         <IconButton icon={ListTree} label="显示大纲" active={outline} disabled={!doc && !outline} onClick={() => { finishEdit(); setOutline(!outline); if (!outline) setLibraryOpen(false); }}/>
         <IconButton icon={Search} label="查找节点 (Ctrl + F)" active={searchOpen} disabled={!doc} onClick={() => { finishEdit(); setSearchOpen(!searchOpen); }} className="optional"/>
@@ -993,13 +1116,26 @@ export default function App() {
         </aside>
       </ResizableSidebar>}
 
-      <main ref={canvas} className={`canvas ${panning ? 'panning' : ''} ${dragId ? 'dragging' : ''}`} data-drag-node={dragId ?? undefined} aria-label="思维导图画布"
+      <main ref={canvas} className={`canvas ${panning ? 'panning' : ''} ${dragId ? 'dragging' : ''} ${relationshipSource ? 'adding-relationship' : ''}`} data-drag-node={dragId ?? undefined} aria-label="思维导图画布"
+        onPointerMove={e => {
+          if (!relationshipSource || !canvas.current) return;
+          const rect = canvas.current.getBoundingClientRect(), camera = viewRef.current;
+          const targetId = (e.target as HTMLElement).closest('[data-node-id]')?.getAttribute('data-node-id') ?? undefined;
+          setRelationshipPointer({ x: (e.clientX - rect.left - camera.x) / camera.scale, y: (e.clientY - rect.top - camera.y) / camera.scale, targetId });
+        }}
+        onPointerDownCapture={e => {
+          if (!relationshipSource || e.button !== 0) return;
+          const targetId = (e.target as HTMLElement).closest('[data-node-id]')?.getAttribute('data-node-id');
+          if (targetId) { e.preventDefault(); e.stopPropagation(); connectRelationship(targetId); }
+        }}
         onClickCapture={e => { if (ignoreDragClick.current) { e.preventDefault(); e.stopPropagation(); ignoreDragClick.current = false; } }}
         onContextMenu={e => { e.preventDefault(); }} onPointerDown={e => {
         if (!docRef.current) return;
         if (e.button !== 0 && e.button !== 1) return;
-        if ((e.target as HTMLElement).closest('button, textarea, input, .mind-node, .popover, .search-panel, .selection-toolbar')) return;
+        if ((e.target as HTMLElement).closest('button, textarea, input, .mind-node, .relationship-layer, .popover, .search-panel, .selection-toolbar')) return;
         ignoreDragClick.current = false; finishEdit(); setSelectedImage(null); setMenu(false); setContext(null);
+        setRelationshipSource(null); setRelationshipPointer(null);
+        if (selectedRelationshipRef.current) select('', false);
         pan.current = { x: e.clientX, y: e.clientY, view: { ...viewRef.current } }; setPanning(true);
         e.currentTarget.setPointerCapture(e.pointerId);
       }}>
@@ -1019,12 +1155,19 @@ export default function App() {
               return <path key={id} data-edge-to={id} data-preview-parent={destinationParent ?? undefined} opacity={draggedNodes.has(id) ? .7 : 1} strokeDasharray={id === dragId ? '4 4' : undefined} d={`M${x1} ${y1} C${x1 + bend} ${y1},${x2 - bend} ${y2},${x2} ${y2}`} fill="none" stroke="var(--node-ink)" strokeWidth="1" markerEnd="url(#arrow)"/>;
             }))}
           </svg>
+          <RelationshipLayer key={session.token} relationships={doc.relationships ?? []} boxes={relationshipBoxes} measure={measure} scale={view.scale}
+            selectedId={selectedRelationship} editingId={relationshipEdit?.id ?? null} disabled={busy || !!dragId || !!mediaPreview || !!relationshipSource}
+            onSelect={id => { finishEdit(); selectRelationship(id); }} onEdit={editRelationship}
+            onTextChange={updateRelationshipText} onFinishEdit={finishEdit} onCancelEdit={cancelRelationshipEdit}
+            onGestureStart={id => { finishEdit(); selectRelationship(id); mediaGesture.current = true; }}
+            onGestureCommit={commitRelationshipControls} onGestureCancel={() => { mediaGesture.current = false; }} onRemove={removeRelationship}/>
+          {relationshipPreview && <svg className="connections relationship-preview" width={layout.width} height={layout.height} aria-hidden="true"><path d={relationshipPreview} fill="none" stroke="var(--node-ink)" strokeWidth="1" strokeDasharray="5 5" markerEnd="url(#arrow)"/></svg>}
           {visible.map(node => {
             const box = layout.boxes[node.id];
             const isEditing = edit?.id === node.id;
             const offset = draggedNodes.has(node.id) ? dragOffset : { x: 0, y: 0 };
             return <div key={node.id} data-node-id={node.id} role="treeitem" aria-label={node.text || '空白节点'} aria-selected={selected === node.id} aria-level={node.depth + 1} aria-expanded={node.children.length ? !node.collapsed : undefined} tabIndex={-1}
-              className={`mind-node ${selected === node.id ? 'selected' : ''} ${isEditing ? 'editing' : ''} ${node.id === doc.rootId ? 'root-node' : ''} ${draggedNodes.has(node.id) ? 'drag-source' : ''} ${drop?.id === node.id ? 'drop-' + drop.position : ''}`}
+              className={`mind-node ${selected === node.id ? 'selected' : ''} ${isEditing ? 'editing' : ''} ${node.id === doc.rootId ? 'root-node' : ''} ${draggedNodes.has(node.id) ? 'drag-source' : ''} ${drop?.id === node.id ? 'drop-' + drop.position : ''} ${relationshipSource && relationshipPointer?.targetId === node.id && node.id !== relationshipSource ? 'relationship-target' : ''}`}
               style={{ left: box.x + offset.x, top: box.y + offset.y, width: box.width, height: box.height }}
               onDoubleClick={e => { if ((e.target as HTMLElement).closest('button, .node-image, .node-resize-handle')) return; startEdit(node.id); }}
               onPointerDown={e => {
@@ -1090,8 +1233,15 @@ export default function App() {
           <span className="divider"/>
           <button onClick={() => add('sibling')} title="添加同级节点"><Plus size={15}/><span>同级</span><kbd>Enter</kbd></button>
           <span className="divider"/>
+          {relationshipSource ? <IconButton icon={X} label="取消添加联系 (Esc)" onClick={() => { setRelationshipSource(null); setRelationshipPointer(null); }}/>
+            : <button onClick={startRelationship} title="添加联系" aria-label="添加联系"><Spline size={15}/><span>联系</span></button>}
+          <span className="divider"/>
           <IconButton icon={ChevronsUpDown} label="折叠 / 展开 (Space)" disabled={!currentNode.children.length} onClick={() => toggle()}/>
           <IconButton icon={MoreHorizontal} label="更多节点操作" onClick={() => { const rect = canvas.current!.getBoundingClientRect(); setContext({ x: Math.min(rect.left + rect.width / 2, window.innerWidth - 245), y: rect.bottom - 365 }); }}/>
+        </div>}
+        {currentRelationship && <div className="selection-toolbar relationship-toolbar" onPointerDown={e => e.preventDefault()}>
+          <IconButton icon={Pencil} label="编辑联系文字" onClick={() => editRelationship(currentRelationship.id)}/>
+          <IconButton icon={Trash2} label="删除联系" onClick={() => removeRelationship(currentRelationship.id)}/>
         </div>}
       </main>
     </div>
@@ -1104,8 +1254,9 @@ export default function App() {
       <button disabled={!doc} onClick={() => void fileAction('save-as')}><Save size={16}/><span>另存为…</span><kbd>Ctrl + Shift + S</kbd></button>
       <div className="menu-separator"/>
       <button disabled={!doc} onClick={() => void exportFile()}><Download size={16}/><span>导出为 Markdown</span></button>
-      <button disabled={!doc} onClick={() => void exportPdf()}><Download size={16}/><span>导出为 PDF</span></button>
+      <button disabled={!doc || fontBusy} onClick={() => void exportPdf()}><Download size={16}/><span>导出为 PDF</span></button>
       <button onClick={() => { setMenu(false); void api?.reveal(); }}><Folder size={16}/><span>在文件夹中显示</span></button>
+      <label className="font-menu-field"><Type size={16}/><span>字体</span><select aria-label="字体" value={font} disabled={fontBusy} onChange={event => void changeFont(event.target.value as AppFont)}><option value="serif">衬线体</option><option value="nevermind">NeverMind</option></select></label>
       <button onClick={() => { setMenu(false); finishEdit(); setHelp(true); }}><Keyboard size={16}/><span>快捷键</span></button>
     </div>}
     {context && doc && <div ref={contextElement} className="popover context-menu" style={{ left: context.x, top: context.y }}>
@@ -1115,6 +1266,7 @@ export default function App() {
       <button onClick={() => pasteContent()}><ClipboardPaste size={16}/><span>粘贴</span><kbd>Ctrl + V</kbd></button>
       <button onClick={() => { setContext(null); add('child'); }}><CornerDownRight size={16}/><span>添加子节点</span><kbd>Tab</kbd></button>
       <button onClick={() => { setContext(null); add('sibling'); }}><Plus size={16}/><span>添加同级节点</span><kbd>Enter</kbd></button>
+      <button onClick={startRelationship}><Spline size={16}/><span>添加联系</span></button>
       <button disabled={!currentNode?.children.length} onClick={() => { setContext(null); toggle(); }}><ChevronsUpDown size={16}/><span>{currentNode?.collapsed ? '展开分支' : '折叠分支'}</span><kbd>Space</kbd></button>
       <div className="menu-separator"/>
       <button disabled={selected === doc.rootId} onClick={() => { apply(reorderNode(docRef.current!, selected, -1)); setContext(null); }}><ArrowUp size={16}/><span>上移</span><kbd>Alt + ↑</kbd></button>

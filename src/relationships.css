@@ -1,0 +1,16 @@
+.relationship-layer { position: absolute; left: 0; top: 0; width: 0; height: 0; pointer-events: none; color: var(--node-ink); }
+.relationships { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+.relationship-controls { z-index: 3; }
+.relationship-line { fill: none; stroke: var(--node-ink); stroke-width: 1; stroke-dasharray: 6 5; pointer-events: none; }
+.relationship-arrow { stroke: var(--node-ink); stroke-width: 1; stroke-linecap: round; stroke-linejoin: round; }
+.relationships .is-selected > .relationship-line { stroke-width: 1.7; }
+.relationship-hit { fill: none; stroke: transparent; stroke-width: 14; pointer-events: stroke; cursor: grab; outline: none; }
+.relationship-hit:focus-visible { stroke: var(--node-ink); stroke-opacity: .1; }
+.relationship-guide { fill: none; stroke: var(--node-ink); stroke-width: .7; stroke-opacity: .35; pointer-events: none; }
+.relationship-handle { fill: var(--paper); stroke: var(--node-ink); stroke-width: 1; pointer-events: all; cursor: grab; outline: none; }
+.relationship-label { position: absolute; box-sizing: border-box; padding: 4px 8px; background: var(--paper); color: var(--node-ink); font: 400 14px/23px var(--font-node); text-align: center; pointer-events: auto; cursor: text; }
+.relationship-label.is-editing { outline: 1px solid var(--node-ink); outline-offset: 2px; }
+.relationship-label-text { display: block; width: 100%; white-space: pre; pointer-events: none; }
+.relationship-label-text > span { display: block; min-height: 23px; }
+.relationship-editor { display: block; box-sizing: border-box; width: 100%; height: 100%; padding: 0; margin: 0; border: none; outline: none; resize: none; background: var(--paper); color: var(--node-ink); font: inherit; line-height: inherit; text-align: center; overflow: hidden; overflow-wrap: anywhere; word-break: break-all; white-space: pre-wrap; user-select: text; }
+.relationship-layer.is-disabled .relationship-hit, .relationship-layer.is-disabled .relationship-label, .relationship-layer.is-disabled .relationship-handle { pointer-events: none; }

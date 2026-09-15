@@ -1,0 +1,24 @@
+NeverMind Regular and Bold
+Copyright (c) 2020 XMind ltd. All Rights Reserved
+
+These font files are bundled unchanged under the SIL Open Font License 1.1.
+The complete original license is included in NeverMind-LICENSE.txt.
+
+Official source: https://github.com/xmindltd/nevermind
+Commit: 95cf07751b088a82f60d398dec61b2aaf98f9f52
+Upstream paths:
+  fonts/NeverMind/NeverMind-Regular.ttf
+  fonts/NeverMind/NeverMind-Bold.ttf
+  LICENSE
+Downloaded: 2026-09-15
+
+SHA-256:
+  NeverMind-Regular.ttf E04769C6207F3C56484BEBDD1DE6E36ED05B36F45C9A3EDE5A279F5CF9DEB569
+  NeverMind-Bold.ttf 826D870638153BE95A8F1DE073A200253B96674B92871D8080AFAA98D6029042
+
+Xmind's announcement:
+https://xmind.com/blog/nevermind-xmind-original-typeface-is-open-to-download-for-free
+
+NeverMind provides the Latin, Greek and Cyrillic lettering. Chinese characters
+use the locally installed Microsoft YaHei font, with PingFang SC and the
+system sans-serif family as fallbacks. These system fonts are not bundled.
