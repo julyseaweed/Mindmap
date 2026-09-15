@@ -25,6 +25,7 @@ await fs.writeFile(path.join(home, '.mindmap', 'workspace.json'), JSON.stringify
 const env = { ...process.env, INKMAP_HOME: home, INKMAP_TEST: '1' };
 delete env.ELECTRON_RUN_AS_NODE;
 delete env.INKMAP_DEV;
+const smoke = process.env.INKMAP_TEST_RESPONSIVE_SMOKE === '1';
 let app;
 let page;
 let stage = 'launch';
@@ -113,6 +114,26 @@ const checkToolbars = async description => {
 };
 const cameraScale = () => page.locator('.world').evaluate(element => new DOMMatrix(getComputedStyle(element).transform).a);
 const saveCompleted = check => eventually(async () => await page.locator('.app[data-save-state="saved"]').count() === 1 && check(await readDoc()), '新增节点或撤销未保存');
+const capture = async () => {
+  let timer;
+  try {
+    const png = await Promise.race([
+      app.evaluate(async ({ BrowserWindow }) => {
+        const image = await BrowserWindow.getAllWindows()[0].webContents.capturePage(undefined, { stayHidden: true });
+        return image.isEmpty() ? null : image.toPNG().toString('base64');
+      }),
+      new Promise(resolve => { timer = setTimeout(() => resolve(null), 5000); }),
+    ]);
+    if (png) {
+      const output = path.join(home, 'narrow-window.png');
+      await fs.writeFile(output, Buffer.from(png, 'base64'));
+      return output;
+    }
+    console.log('Optional narrow-window screenshot skipped: hidden compositor unavailable.');
+  } catch { console.log('Optional narrow-window screenshot unavailable.'); }
+  finally { clearTimeout(timer); }
+  return null;
+};
 
 try {
   const executablePath = process.env.INKMAP_TEST_EXECUTABLE;
@@ -121,7 +142,7 @@ try {
   page.setDefaultTimeout(10000);
   page.on('pageerror', error => errors.push(error.message));
   await node('alpha').waitFor();
-  for (const font of ['serif', 'nevermind']) for (const theme of ['light', 'dark']) {
+  if (!smoke) for (const font of ['serif', 'nevermind']) for (const theme of ['light', 'dark']) {
     await setAppearance(font, theme);
     for (const windowWidth of [560, 720, 960]) {
       await setWindow(windowWidth);
@@ -139,10 +160,16 @@ try {
   }
 
   stage = 'real actions in the narrowest canvas';
+  await setAppearance('nevermind', 'dark');
   await setWindow(560);
   await setSidebar('library-max');
   await fit();
+  if (smoke) {
+    await page.locator('.canvas .relationship-label').click();
+    await checkToolbars('narrowest canvas relationship');
+  }
   await node('alpha').click();
+  if (smoke) await checkToolbars('narrowest canvas node');
   const scale = await cameraScale();
   await page.getByRole('button', { name: '放大', exact: true }).click();
   await eventually(async () => await cameraScale() > scale, '窄画布的放大按钮应正常操作');
@@ -164,12 +191,12 @@ try {
   assert.ok(menuBounds.x >= 0 && menuBounds.y >= 0 && menuBounds.x + menuBounds.width <= viewport.width + 1 && menuBounds.y + menuBounds.height <= viewport.height + 1, '更多菜单应在小窗口内完整显示或可滚动');
   await page.keyboard.press('Escape');
   await checkToolbars('narrowest canvas after real actions');
-  await page.screenshot({ path: path.join(home, 'narrow-window.png'), timeout: 10000 });
   assert.deepEqual((await readDoc()).nodes, original.nodes);
   assert.deepEqual((await readDoc()).relationships, original.relationships);
   assert.equal(await page.locator('.app-error, .save-error').count(), 0);
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ success: true, home, scenarios: checked.length, checks: ['560/720/960px windows at 420px height', 'no sidebar and both sidebars at default/maximum widths', 'both fonts and themes', 'node and relationship toolbars centered within canvas', 'all controls visible and hit-testable', 'separate centered zoom row', 'real zoom, child creation, undo and more menu'] }, null, 2));
+  const screenshot = await capture();
+  console.log(JSON.stringify({ success: true, home, smoke, screenshot, scenarios: checked.length, checks: [...(smoke ? ['560px window at 420px height, NeverMind/dark, maximum library width'] : ['560/720/960px windows at 420px height', 'no sidebar and both sidebars at default/maximum widths', 'both fonts and themes']), 'node and relationship toolbars centered within canvas', 'all controls visible and hit-testable', 'separate centered zoom row', 'real zoom, child creation, undo and more menu', 'document preserved and no application errors'] }, null, 2));
 } catch (error) {
   console.error(`Responsive canvas test failed at: ${stage}`, error);
   console.error(JSON.stringify({ home, lastScenarios: checked.slice(-4) }));
