@@ -219,34 +219,23 @@ try {
   assert.ok(Object.values((await readDoc()).nodes).some(node => node.text === text));
   assert.equal(await fs.readFile(otherFile, 'utf8'), otherBefore, '粘贴不应串入另一张导图');
 
-  stage = 'deleting current map reloads replacement contents even when id and title match';
+  stage = 'explicit reopen refreshes contents even when document id and title match';
   console.log(`Interaction boundaries: ${stage}`);
-  const replacement = await page.evaluate(async target => ({ session: await window.inkmap.open(target), library: await window.inkmap.library() }), file);
-  assert.equal(replacement.session.doc.id, other.id);
-  assert.equal(replacement.session.doc.title, other.title);
-  await app.evaluate(({ ipcMain }, value) => {
-    ipcMain.removeHandler('library:delete');
-    ipcMain.handle('library:delete', (_, requested) => {
-      if (requested !== value.source) throw new Error('Unexpected test delete target');
-      return value.result;
-    });
-  }, { source: otherFile, result: replacement });
-  const currentRow = page.locator('.library-row.is-current');
-  assert.equal(await currentRow.getAttribute('data-library-path'), otherFile);
-  await currentRow.click({ button: 'right' });
-  await page.getByRole('menuitem', { name: '删除', exact: true }).click();
-  await eventually(async () => await node('root').locator('.node-text').innerText() === original.nodes.root.text, '同id同标题的替代文件必须刷新画布');
+  await app.evaluate(({ dialog }, target) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [target] }); }, file);
+  await page.keyboard.press('Control+o');
+  await eventually(async () => JSON.parse(await fs.readFile(workspace, 'utf8')).current === file, '显式重新打开未完成');
+  await eventually(async () => await node('root').locator('.node-text').innerText() === original.nodes.root.text, '同id同标题的文件必须刷新画布');
   await select('peer');
   await page.keyboard.press('F2');
   await page.getByRole('textbox', { name: '编辑节点', exact: true }).fill('替代导图中继续编辑');
   await page.keyboard.press('Control+Enter');
   await saved(doc => doc.nodes.peer?.text === '替代导图中继续编辑');
   assert.equal((await readDoc()).nodes.root.text, original.nodes.root.text);
-  assert.equal(await fs.readFile(otherFile, 'utf8'), otherBefore, '模拟删除不应删除或覆盖测试原文件');
+  assert.equal(await fs.readFile(otherFile, 'utf8'), otherBefore, '重新打开其他文件不应覆盖之前的导图');
   assert.equal(await page.locator('.app-error, .save-error').count(), 0);
   assert.deepEqual(errors, []);
 
-  console.log(JSON.stringify({ success: true, home, checks: ['English/mixed/empty editor height at 85% zoom', 'image spacing while editing', 'clipboard blocked during active drag', 'pending paste before Obsidian copy', 'pending paste before Markdown export', 'pending paste before document switch', 'same-id same-title replacement after deletion', 'no real clipboard access or actual deletion'] }, null, 2));
+  console.log(JSON.stringify({ success: true, home, checks: ['English/mixed/empty editor height at 85% zoom', 'image spacing while editing', 'clipboard blocked during active drag', 'pending paste before Obsidian copy', 'pending paste before Markdown export', 'pending paste before document switch', 'same-id same-title explicit reopen', 'no real clipboard access or actual deletion'] }, null, 2));
   }
 } catch (error) {
   console.error(`Interaction boundaries test failed at: ${stage}`);

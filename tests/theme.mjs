@@ -87,7 +87,8 @@ const storedTheme = async () => JSON.parse(await fs.readFile(appearance, 'utf8')
 const setTheme = async theme => {
   const label = theme === 'dark' ? '切换到深色模式' : '切换到浅色模式';
   const toggle = page.locator('.titlebar').getByRole('button', { name: label, exact: true });
-  assert.equal(await page.locator('.titlebar button').count(), 1);
+  assert.equal(await page.locator('.titlebar .theme-toggle').count(), 1);
+  assert.equal(await page.locator('.titlebar .font-toggle').count(), 1);
   await toggle.click();
   await page.locator(`html[data-theme="${theme}"]`).waitFor();
   await eventually(async () => await storedTheme() === theme, '主题偏好没有写入隔离目录');

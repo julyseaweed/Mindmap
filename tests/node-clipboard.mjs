@@ -26,6 +26,10 @@ original.nodes = {
   picture: { id: 'picture', text: '带图片的后代', children: [], collapsed: false, images: [picture('hiddenImage')] },
   target: { id: 'target', text: '当前导图中的目标', children: [], collapsed: false },
 };
+original.relationships = [
+  { id: 'internalLink', sourceId: 'detail', targetId: 'picture', text: '内部关联', control1: { x: 80, y: -90 }, control2: { x: -100, y: -60 } },
+  { id: 'externalLink', sourceId: 'leaf', targetId: 'target', text: '跨分支关联' },
+];
 const other = createDocument('粘贴目标');
 other.nodes.root.text = '另一张导图';
 other.nodes.root.children = ['destination'];
@@ -253,6 +257,18 @@ const assertInserted = (before, after, parentId, source, sourceRoot) => {
   const generated = insertedIds.flatMap(id => [id, ...(after.nodes[id].images ?? []).map(image => image.id)]);
   assert.equal(new Set(generated).size, generated.length, '每个新节点和图片的ID应唯一');
   assert.ok(generated.every(id => !existing.has(id)), '粘贴应为全部节点和图片建立新ID');
+  const remap = new Map(sourceIds.map((id, index) => [id, insertedIds[index]]));
+  const internal = (source.relationships ?? []).filter(link => remap.has(link.sourceId) && remap.has(link.targetId));
+  const insertedSet = new Set(insertedIds);
+  const insertedLinks = (after.relationships ?? []).filter(link => insertedSet.has(link.sourceId));
+  assert.equal(insertedLinks.length, internal.length, '粘贴只保留内部联系');
+  assert.deepEqual(after.relationships?.slice(0, before.relationships?.length ?? 0) ?? [], before.relationships ?? []);
+  const existingLinks = new Set([...(before.relationships ?? []), ...(source.relationships ?? [])].map(link => link.id));
+  internal.forEach((link, index) => {
+    const insertedLink = insertedLinks[index];
+    assert.ok(!existingLinks.has(insertedLink.id), '联系ID应重新生成');
+    assert.deepEqual(insertedLink, { ...link, id: insertedLink.id, sourceId: remap.get(link.sourceId), targetId: remap.get(link.targetId) });
+  });
   return inserted;
 };
 const openDocument = async target => {
@@ -289,6 +305,7 @@ try {
   assert.equal(await app.evaluate(({ clipboard }, type) => clipboard.has(type), branchType), true);
   assert.deepEqual(contentTree(branch, branch.rootId), contentTree(original, 'source'));
   assert.deepEqual(Object.keys(branch.nodes).sort(), ['source', 'detail', 'leaf', 'picture'].sort());
+  assert.deepEqual(branch.relationships, [original.relationships[0]], '复制折叠分支保留隐藏的内部联系并忽略外部联系');
   assert.equal(await app.evaluate(({ clipboard }) => clipboard.readText()), '摘录主题\nSource branch\n\t折叠后代\n\t\t更深一层\n\t带图片的后代');
   assert.equal(await fs.readFile(sourceFile, 'utf8'), originalBytes, '复制不应修改原文件');
 
@@ -304,7 +321,8 @@ try {
   const beforeCut = await readDoc();
   await selectNode('source');
   await page.keyboard.press('Control+x');
-  await saved(doc => !doc.nodes.source && !doc.nodes.detail && !doc.nodes.leaf && !doc.nodes.picture);
+  const cutDocument = await saved(doc => !doc.nodes.source && !doc.nodes.detail && !doc.nodes.leaf && !doc.nodes.picture);
+  assert.ok(cutDocument.relationships.every(link => !['internalLink', 'externalLink'].includes(link.id)), '剪切删除涉及原分支的联系');
   await copied('source');
   await page.keyboard.press('Control+z');
   after = await saved(doc => !!doc.nodes.source);
@@ -354,14 +372,17 @@ try {
 
   stage = 'node context menu copy, paste, cut, and undo';
   let menu = await contextMenu(crossDocumentPaste);
+  stage = 'context menu copy';
   await menu.getByRole('button', { name: /^复制节点/ }).click();
   const menuBranch = await copied(crossDocumentPaste);
   before = await readDoc();
+  stage = 'context menu paste';
   menu = await contextMenu('destination');
   await menu.getByRole('button', { name: /^粘贴(?:\s|$)/ }).click();
   after = await saved(doc => doc.nodes.destination.children.length === before.nodes.destination.children.length + 1);
   const menuPaste = assertInserted(before, after, 'destination', menuBranch, menuBranch.rootId);
   before = await readDoc();
+  stage = 'context menu cut and undo';
   menu = await contextMenu(menuPaste);
   await menu.getByRole('button', { name: /^剪切节点/ }).click();
   await saved(doc => !doc.nodes[menuPaste]);
@@ -393,6 +414,7 @@ try {
   console.log(JSON.stringify({ success: true, home, checks: ['native structure and plain text', 'collapsed descendants and images', 'fresh node and image IDs', 'cut only after successful write', 'undo', 'cross-document paste', 'clipboard survives app restart', 'node context menu operations', 'multiline text as one child', 'all original clipboard formats restored'] }, null, 2));
 } catch (error) {
   console.error(`Node clipboard test failed at: ${stage}`);
+  console.error(error?.stack?.split('\n').filter(line => line.trim().startsWith('at ')).join('\n'));
   // Assertion errors may include actual values: never print clipboard payloads.
   throw new Error(`Node clipboard test failed (${error?.name ?? 'Error'}, ${error?.code ?? 'no code'}).`);
 } finally {

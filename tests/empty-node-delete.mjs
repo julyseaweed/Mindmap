@@ -20,6 +20,11 @@ original.nodes = {
   leaf: { id: 'leaf', text: '折叠后代', children: [], collapsed: false },
   sibling: { id: 'sibling', text: '保持不变', children: [], collapsed: false },
 };
+original.relationships = [
+  { id: 'branchLink', sourceId: 'branch', targetId: 'sibling', text: '' },
+  { id: 'hiddenChildLink', sourceId: 'child', targetId: 'leaf', text: '保留到分支删除' },
+  { id: 'retainedLink', sourceId: 'root', targetId: 'sibling', text: '' },
+];
 await fs.mkdir(maps, { recursive: true });
 await fs.mkdir(path.dirname(workspace), { recursive: true });
 await fs.writeFile(file, JSON.stringify(validateDocument(original), null, 2));
@@ -81,6 +86,7 @@ const deleteAndUndo = async key => {
   assert.deepEqual(removed.nodes.root.children, ['sibling']);
   assert.deepEqual(removed.nodes.sibling, original.nodes.sibling);
   assert.equal(Object.keys(removed.nodes).length, 2);
+  assert.deepEqual(removed.relationships, [original.relationships[2]], '空框删除同步移除相关联系并保留其他联系');
   assert.equal(await editor().count(), 0);
   await page.keyboard.press('Control+z');
   assert.deepEqual(await saved(doc => doc.nodes.branch?.text === ''), blank, '第一次撤销应恢复空框及子树');

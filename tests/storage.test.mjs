@@ -709,6 +709,284 @@ test('a recovery cleanup failure cannot resurrect an explicitly deleted map on r
   await assert.rejects(fs.access(store.recoveryPath), { code: 'ENOENT' });
 });
 
+test('an unreadable recovery journal stops deletion before recycling or changing the session', async t => {
+  const { store, session, dir } = await storeFixture(t);
+  const pending = addNode(session.doc, 'root', 'child', '待保存内容').doc;
+  await atomicWrite(store.recoveryPath, JSON.stringify({ path: session.path, doc: pending }));
+  const snapshot = store.snapshot();
+  const workspace = await fs.readFile(store.statePath, 'utf8');
+  const recovery = await fs.readFile(store.recoveryPath, 'utf8');
+  const readFile = fs.readFile;
+  fs.readFile = async (file, ...args) => {
+    if (file === store.recoveryPath) throw Object.assign(new Error('read denied'), { code: 'EACCES' });
+    return readFile(file, ...args);
+  };
+  try {
+    await assert.rejects(store.deleteLibraryItem(session.path, () => assert.fail('The file must not reach recycling.')), /恢复记录.*尚未删除/);
+  } finally { fs.readFile = readFile; }
+  assert.deepEqual(store.snapshot(), snapshot);
+  assert.equal(await fs.readFile(store.statePath, 'utf8'), workspace);
+  assert.equal(await fs.readFile(store.recoveryPath, 'utf8'), recovery);
+  assert.deepEqual(JSON.parse(await fs.readFile(session.path, 'utf8')), session.doc);
+  assert.deepEqual((await new LocalStore(dir).boot()).doc.nodes, pending.nodes);
+});
+
+test('failure to persist deletion protection leaves the file and recovery untouched', async t => {
+  const { store, session } = await storeFixture(t);
+  const pending = addNode(session.doc, 'root', 'child', '待保存内容').doc;
+  await atomicWrite(store.recoveryPath, JSON.stringify({ path: session.path, doc: pending }));
+  const snapshot = store.snapshot();
+  const workspace = await fs.readFile(store.statePath, 'utf8');
+  const recovery = await fs.readFile(store.recoveryPath, 'utf8');
+  const rename = fs.rename;
+  fs.rename = async (source, target) => {
+    if (target === store.deletionPath) throw Object.assign(new Error('guard write denied'), { code: 'EACCES' });
+    return rename(source, target);
+  };
+  try {
+    await assert.rejects(store.deleteLibraryItem(session.path, () => assert.fail('The file must not reach recycling.')), /保护恢复记录.*尚未删除/);
+  } finally { fs.rename = rename; }
+  assert.deepEqual(store.snapshot(), snapshot);
+  assert.equal(await fs.readFile(store.statePath, 'utf8'), workspace);
+  assert.equal(await fs.readFile(store.recoveryPath, 'utf8'), recovery);
+  assert.deepEqual(JSON.parse(await fs.readFile(session.path, 'utf8')), session.doc);
+});
+
+test('durable deletion protection prevents resurrection when journal cleanup and workspace recording both fail', async t => {
+  const { store, session, dir } = await storeFixture(t);
+  const pending = addNode(session.doc, 'root', 'child', '不应恢复的已删除内容').doc;
+  const recovery = JSON.stringify({ path: session.path, doc: pending });
+  await atomicWrite(store.recoveryPath, recovery);
+  const workspace = await fs.readFile(store.statePath, 'utf8');
+  store.clearRecovery = async () => { throw new Error('journal is locked'); };
+  store.remember = async () => { throw new Error('workspace is locked'); };
+  const { trash } = await simulatedTrash(dir);
+  const removed = await store.deleteLibraryItem(session.path, trash);
+  assert.equal(removed.session.doc, null);
+  assert.match(removed.notice, /已移入回收站.*位置记录/);
+  assert.equal(await fs.readFile(store.statePath, 'utf8'), workspace);
+  assert.equal(await fs.readFile(store.recoveryPath, 'utf8'), recovery);
+  assert.match(JSON.parse(await fs.readFile(store.deletionPath, 'utf8')).recoveryHash, /^[a-f0-9]{64}$/);
+  const restarted = new LocalStore(dir);
+  assert.equal((await restarted.boot()).doc, null);
+  assert.deepEqual(await fs.readdir(store.maps), []);
+  await assert.rejects(fs.access(store.recoveryPath), { code: 'ENOENT' });
+  await assert.rejects(fs.access(store.deletionPath), { code: 'ENOENT' });
+});
+
+test('successful journal cleanup is deferred until the empty workspace can be recorded', async t => {
+  const { store, session, dir } = await storeFixture(t);
+  const recovery = JSON.stringify({ path: session.path, doc: addNode(session.doc, 'root').doc });
+  await atomicWrite(store.recoveryPath, recovery);
+  store.remember = async () => { throw new Error('workspace is locked'); };
+  const { trash } = await simulatedTrash(dir);
+  const removed = await store.deleteLibraryItem(session.path, trash);
+  assert.equal(removed.session.doc, null);
+  assert.equal(await fs.readFile(store.recoveryPath, 'utf8'), recovery);
+  await fs.access(store.deletionPath);
+  const replacement = JSON.stringify(createDocument('同路径新文件'));
+  await fs.writeFile(session.path, replacement);
+  const restarted = new LocalStore(dir);
+  assert.equal((await restarted.boot()).doc, null);
+  assert.equal(await fs.readFile(session.path, 'utf8'), replacement);
+  await assert.rejects(fs.access(store.deletionPath), { code: 'ENOENT' });
+  await assert.rejects(fs.access(store.recoveryPath), { code: 'ENOENT' });
+});
+
+test('a second active deletion cannot overwrite protection for a previously deleted map while metadata remains unavailable', async t => {
+  const { store, session, dir } = await storeFixture(t);
+  const recovery = JSON.stringify({ path: session.path, doc: addNode(session.doc, 'root', 'child', 'A不应复活').doc });
+  await atomicWrite(store.recoveryPath, recovery);
+  const workspace = await fs.readFile(store.statePath, 'utf8');
+  store.remember = async () => { throw new Error('workspace remains locked'); };
+  store.clearRecovery = async () => { throw new Error('journal remains locked'); };
+  const { trash, items } = await simulatedTrash(dir);
+  await store.deleteLibraryItem(session.path, trash);
+  const guard = await fs.readFile(store.deletionPath, 'utf8');
+  const second = await store.create(createDocument('B仍需保留'));
+  const secondBytes = await fs.readFile(second.path, 'utf8');
+  const active = store.snapshot();
+  await assert.rejects(store.deleteLibraryItem(second.path, trash), /上次删除.*尚未删除/);
+  assert.equal(items.length, 1, '第二张导图必须在调用回收站之前停止');
+  assert.deepEqual(store.snapshot(), active);
+  assert.equal(await fs.readFile(second.path, 'utf8'), secondBytes);
+  assert.equal(await fs.readFile(store.deletionPath, 'utf8'), guard);
+  assert.equal(await fs.readFile(store.recoveryPath, 'utf8'), recovery);
+  assert.equal(await fs.readFile(store.statePath, 'utf8'), workspace);
+
+  const restarted = new LocalStore(dir);
+  assert.equal((await restarted.boot()).doc, null);
+  assert.deepEqual(await fs.readdir(store.maps), [path.basename(second.path)]);
+  assert.equal(await fs.readFile(second.path, 'utf8'), secondBytes);
+  await assert.rejects(fs.access(store.recoveryPath), { code: 'ENOENT' });
+  await restarted.open(second.path);
+  assert.equal((await restarted.deleteLibraryItem(second.path, trash)).session.doc, null);
+  assert.equal(items.length, 2);
+});
+
+test('a fully saved active map protects the empty selection even without a recovery journal', async t => {
+  const { store, session, dir } = await storeFixture(t);
+  await assert.rejects(fs.access(store.recoveryPath), { code: 'ENOENT' });
+  const original = await fs.readFile(session.path, 'utf8');
+  const snapshot = store.snapshot();
+  const { trash, items } = await simulatedTrash(dir);
+  const rename = fs.rename;
+  fs.rename = async (source, target) => {
+    if (target === store.deletionPath) throw new Error('guard write denied');
+    return rename(source, target);
+  };
+  try { await assert.rejects(store.deleteLibraryItem(session.path, trash), /尚未删除/); }
+  finally { fs.rename = rename; }
+  assert.equal(items.length, 0);
+  assert.deepEqual(store.snapshot(), snapshot);
+  assert.equal(await fs.readFile(session.path, 'utf8'), original);
+
+  store.remember = async () => { throw new Error('workspace is locked'); };
+  const removed = await store.deleteLibraryItem(session.path, trash);
+  assert.equal(removed.session.doc, null);
+  assert.equal(JSON.parse(await fs.readFile(store.deletionPath, 'utf8')).recoveryHash, null);
+  const replacement = JSON.stringify(createDocument('不应自动打开的新实体'));
+  await fs.writeFile(session.path, replacement);
+  assert.equal((await new LocalStore(dir).boot()).doc, null);
+  assert.equal(await fs.readFile(session.path, 'utf8'), replacement);
+  await assert.rejects(fs.access(store.deletionPath), { code: 'ENOENT' });
+});
+
+test('deletion protection survives repeated failed startup records even when the journal disappears independently', async t => {
+  const { store, session, dir } = await storeFixture(t);
+  await atomicWrite(store.recoveryPath, JSON.stringify({ path: session.path, doc: addNode(session.doc, 'root').doc }));
+  const workspace = await fs.readFile(store.statePath, 'utf8');
+  store.remember = async () => { throw new Error('workspace is locked'); };
+  const { trash } = await simulatedTrash(dir);
+  await store.deleteLibraryItem(session.path, trash);
+  const guard = await fs.readFile(store.deletionPath, 'utf8');
+  const replacement = JSON.stringify(createDocument('外部重建文件'));
+  await fs.writeFile(session.path, replacement);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt === 1) await fs.rename(store.recoveryPath, path.join(dir, 'removed-recovery-fixture.json'));
+    const restarted = new LocalStore(dir);
+    restarted.remember = async () => { throw new Error('workspace is still locked'); };
+    const result = await restarted.boot();
+    assert.equal(result.doc, null);
+    assert.match(result.notice, /位置记录/);
+    assert.equal(await fs.readFile(store.deletionPath, 'utf8'), guard);
+    assert.equal(await fs.readFile(store.statePath, 'utf8'), workspace);
+    assert.equal(await fs.readFile(session.path, 'utf8'), replacement);
+  }
+  assert.equal((await new LocalStore(dir).boot()).doc, null);
+  assert.equal(await fs.readFile(session.path, 'utf8'), replacement);
+  await assert.rejects(fs.access(store.deletionPath), { code: 'ENOENT' });
+  assert.deepEqual(await fs.readdir(store.maps), [path.basename(session.path)]);
+});
+
+test('failed recycling and failed guard rollback keep pending edits recoverable from the original entry', async t => {
+  const { store, session, dir } = await storeFixture(t);
+  const pending = addNode(session.doc, 'root', 'child', '回收失败后仍需恢复').doc;
+  const recovery = JSON.stringify({ path: session.path, doc: pending });
+  await atomicWrite(store.recoveryPath, recovery);
+  const snapshot = store.snapshot();
+  const workspace = await fs.readFile(store.statePath, 'utf8');
+  const rm = fs.rm;
+  fs.rm = async (file, ...args) => {
+    if (file === store.deletionPath) throw Object.assign(new Error('rollback denied'), { code: 'EACCES' });
+    return rm(file, ...args);
+  };
+  try {
+    await assert.rejects(store.deleteLibraryItem(session.path, async () => { throw new Error('回收站不可用'); }), /回收站不可用/);
+  } finally { fs.rm = rm; }
+  assert.deepEqual(store.snapshot(), snapshot);
+  assert.equal(await fs.readFile(store.statePath, 'utf8'), workspace);
+  assert.equal(await fs.readFile(store.recoveryPath, 'utf8'), recovery);
+  await fs.access(store.deletionPath);
+  const restored = await new LocalStore(dir).boot();
+  assert.match(restored.notice, /恢复/);
+  assert.deepEqual(restored.doc.nodes, pending.nodes);
+  assert.notEqual(restored.path, session.path);
+  assert.deepEqual(JSON.parse(await fs.readFile(session.path, 'utf8')), session.doc);
+  await assert.rejects(fs.access(store.deletionPath), { code: 'ENOENT' });
+});
+
+test('a replaced deleted path stays unselected when its pre-delete workspace could not be updated', async t => {
+  const { store, session, dir } = await storeFixture(t);
+  await atomicWrite(store.recoveryPath, JSON.stringify({ path: session.path, doc: addNode(session.doc, 'root').doc }));
+  store.clearRecovery = async () => { throw new Error('journal is locked'); };
+  store.remember = async () => { throw new Error('workspace is locked'); };
+  const { trash } = await simulatedTrash(dir);
+  await store.deleteLibraryItem(session.path, trash);
+  const replacement = createDocument('外部重建的文件');
+  const bytes = JSON.stringify(replacement, null, 2);
+  await fs.writeFile(session.path, bytes);
+  assert.equal((await new LocalStore(dir).boot()).doc, null);
+  assert.equal(await fs.readFile(session.path, 'utf8'), bytes);
+  assert.deepEqual(await fs.readdir(store.maps), [path.basename(session.path)]);
+});
+
+test('a committed deletion guard survives a later failed recycle while an explicit same-path open remains selected', async t => {
+  const { store, session, dir } = await storeFixture(t);
+  await atomicWrite(store.recoveryPath, JSON.stringify({ path: session.path, doc: addNode(session.doc, 'root').doc }));
+  store.clearRecovery = async () => { throw new Error('journal is locked'); };
+  store.remember = async () => { throw new Error('workspace is locked'); };
+  const { trash } = await simulatedTrash(dir);
+  await store.deleteLibraryItem(session.path, trash);
+  const originalGuard = await fs.readFile(store.deletionPath, 'utf8');
+  const replacement = createDocument('明确打开的新文件');
+  replacement.nodes.root.text = '应该保留并打开的新内容';
+  await fs.writeFile(session.path, JSON.stringify(replacement, null, 2));
+  // Simulate a new session that explicitly opens the new entry while cleanup is pending.
+  const current = new LocalStore(dir);
+  await current.open(session.path);
+  const rm = fs.rm;
+  fs.rm = async (file, ...args) => {
+    if (file === current.deletionPath) throw new Error('rollback denied');
+    return rm(file, ...args);
+  };
+  try {
+    await assert.rejects(current.deleteLibraryItem(session.path, async () => { throw new Error('再次回收失败'); }), /再次回收失败/);
+  } finally { fs.rm = rm; }
+  assert.equal(await fs.readFile(store.deletionPath, 'utf8'), originalGuard, '不可覆盖已经证明成功删除的保护记录');
+  const restarted = await new LocalStore(dir).boot();
+  assert.equal(restarted.path, session.path);
+  assert.deepEqual(restarted.doc, replacement);
+  assert.deepEqual(await fs.readdir(store.maps), [path.basename(session.path)]);
+  await assert.rejects(fs.access(store.recoveryPath), { code: 'ENOENT' });
+});
+
+test('unreadable or invalid deletion protection and unknown source identity stop recovery without changing files', async t => {
+  const { store, session, dir } = await storeFixture(t);
+  const pending = addNode(session.doc, 'root', 'child', '必须保留').doc;
+  const recovery = JSON.stringify({ path: session.path, doc: pending });
+  await atomicWrite(store.recoveryPath, recovery);
+  const rm = fs.rm;
+  fs.rm = async (file, ...args) => {
+    if (file === store.deletionPath) throw new Error('rollback denied');
+    return rm(file, ...args);
+  };
+  try { await assert.rejects(store.deleteLibraryItem(session.path, async () => { throw new Error('回收失败'); }), /回收失败/); }
+  finally { fs.rm = rm; }
+  const guard = await fs.readFile(store.deletionPath, 'utf8');
+  const workspace = await fs.readFile(store.statePath, 'utf8');
+  const files = await fs.readdir(store.maps);
+  for (const fault of ['guard-read', 'guard-json', 'source-stat']) {
+    const readFile = fs.readFile, lstat = fs.lstat;
+    if (fault === 'guard-json') await fs.writeFile(store.deletionPath, '{invalid');
+    if (fault === 'guard-read') fs.readFile = async (file, ...args) => {
+      if (file === store.deletionPath) throw Object.assign(new Error('guard read denied'), { code: 'EACCES' });
+      return readFile(file, ...args);
+    };
+    if (fault === 'source-stat') fs.lstat = async (file, ...args) => {
+      if (file === session.path) throw Object.assign(new Error('source stat denied'), { code: 'EACCES' });
+      return lstat(file, ...args);
+    };
+    try { await assert.rejects(new LocalStore(dir).boot(), /无法核验删除恢复记录/); }
+    finally { fs.readFile = readFile; fs.lstat = lstat; }
+    assert.equal(await fs.readFile(store.recoveryPath, 'utf8'), recovery);
+    assert.equal(await fs.readFile(store.statePath, 'utf8'), workspace);
+    assert.deepEqual(await fs.readdir(store.maps), files);
+    if (fault === 'guard-json') await fs.writeFile(store.deletionPath, guard);
+  }
+  assert.deepEqual((await new LocalStore(dir).boot()).doc.nodes, pending.nodes);
+});
+
 test('the empty canvas and discarded journal marker still allow recovery of a newer document', async t => {
   const { store, session, dir } = await storeFixture(t);
   await atomicWrite(store.recoveryPath, JSON.stringify({ path: session.path, doc: session.doc }));

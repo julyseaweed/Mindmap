@@ -25,6 +25,7 @@ const insideKey = (root, key) => sameKey(root, key) || comparableKey(key).starts
 const displayName = entry => entry.kind === 'folder' ? entry.name : entry.title || entry.name.replace(/\.mindmap$/i, '');
 const MAX_DOCUMENT_BYTES = 128 * 1024 * 1024;
 const recoveryHash = content => createHash('sha256').update(content).digest('hex');
+const fileIdentity = stat => `${stat.dev}:${stat.ino}:${stat.birthtimeMs}`;
 const entryName = value => {
   if (typeof value !== 'string') throw new Error('请输入有效名称。');
   const name = value.trim();
@@ -38,6 +39,7 @@ export class LocalStore {
     this.maps = path.join(this.home, '导图');
     this.statePath = path.join(home, '.mindmap', 'workspace.json');
     this.recoveryPath = path.join(home, '.mindmap', 'recovery.json');
+    this.deletionPath = path.join(home, '.mindmap', 'pending-delete.json');
     this.orderPath = path.join(home, '.mindmap', 'library-order.json');
     this.order = Object.create(null);
     this.orderLoaded = null;
@@ -49,14 +51,40 @@ export class LocalStore {
 
   async boot() {
     await fs.mkdir(this.maps, { recursive: true });
-    try { this.state = JSON.parse(await fs.readFile(this.statePath, 'utf8')); } catch {}
+    let workspaceHash = null;
+    try {
+      const workspace = await fs.readFile(this.statePath, 'utf8');
+      workspaceHash = recoveryHash(workspace);
+      this.state = JSON.parse(workspace);
+    } catch {}
     if (!this.state || !Array.isArray(this.state.recent)) this.state = { recent: [], current: null };
     this.state.recent = this.state.recent.filter(item => item && typeof item.path === 'string' && path.isAbsolute(item.path));
+    const deletion = await this.deletedRecovery();
+    if (deletion) {
+      if (deletion.recoveryHash) this.state.discardedRecoveryHash = deletion.recoveryHash;
+      if (deletion.activePath && deletion.workspaceHash === workspaceHash) {
+        this.state.current = null;
+        this.state.draftOnly = false;
+        this.state.emptyCanvas = true;
+      }
+    }
+    const finishBoot = async result => {
+      if (!result.notice && (deletion || this.state.discardedRecoveryHash)) {
+        try {
+          let content;
+          try { content = await fs.readFile(this.recoveryPath, 'utf8'); }
+          catch (error) { if (error.code !== 'ENOENT') throw error; }
+          if (content !== undefined && recoveryHash(content) === this.state.discardedRecoveryHash) await this.clearRecovery();
+          await fs.rm(this.deletionPath, { force: true });
+        } catch { /* Retry cleanup after a later successful workspace record. */ }
+      }
+      return result;
+    };
     // A failed or interrupted disk write is restored as a separate file, keeping the original intact.
     try {
       const recoveryContent = await fs.readFile(this.recoveryPath, 'utf8');
-      if (this.state.discardedRecoveryHash === recoveryHash(recoveryContent)) {
-        await this.clearRecovery().catch(() => {});
+      const hash = recoveryHash(recoveryContent);
+      if (this.state.discardedRecoveryHash === hash) {
         throw new Error('Recovery belongs to an explicitly deleted document.');
       }
       const recovery = JSON.parse(recoveryContent);
@@ -77,15 +105,15 @@ export class LocalStore {
       await this.finishSaveMetadata();
       return result;
     } catch {}
-    if (this.state.emptyCanvas === true) return this.openEmpty();
+    if (this.state.emptyCanvas === true) return finishBoot(await this.openEmpty());
     if (this.state.current) {
-      try { return await this.open(this.state.current); }
+      try { return await finishBoot(await this.open(this.state.current)); }
       catch {
-        const result = await this.openEmpty();
+        const result = await finishBoot(await this.openEmpty());
         return { ...result, notice: result.notice ?? '上次的文件已移动或无法读取。你可以从文件菜单重新打开。' };
       }
     }
-    return this.state.draftOnly ? this.openDraft() : this.create();
+    return finishBoot(await (this.state.draftOnly ? this.openDraft() : this.create()));
   }
 
   async remember() {
@@ -110,11 +138,29 @@ export class LocalStore {
     await fs.rm(this.recoveryPath, { force: true });
   }
 
+  async deletedRecovery(hash) {
+    try {
+      let pending;
+      try { pending = JSON.parse(await fs.readFile(this.deletionPath, 'utf8')); }
+      catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+      if (!pending || (pending.recoveryHash !== null && !/^[a-f0-9]{64}$/.test(pending.recoveryHash)) || typeof pending.identity !== 'string' || !pending.identity || !this.containsLibraryPath(pending.source) || samePath(pending.source, this.maps)) throw new Error('Invalid pending deletion.');
+      if (pending.activePath !== undefined && (typeof pending.activePath !== 'string' || !within(pending.source, pending.activePath))) throw new Error('Invalid pending deletion session.');
+      if (pending.recoveryHash === null && !pending.activePath) throw new Error('Missing pending deletion session.');
+      if (pending.workspaceHash !== undefined && pending.workspaceHash !== null && !/^[a-f0-9]{64}$/.test(pending.workspaceHash)) throw new Error('Invalid pending deletion workspace.');
+      if (hash !== undefined && pending.recoveryHash !== hash) return null;
+      try { return fileIdentity(await fs.lstat(pending.source)) !== pending.identity ? pending : null; }
+      catch (error) { if (error.code === 'ENOENT') return pending; throw error; }
+    } catch {
+      throw Object.assign(new Error('暂时无法核验删除恢复记录，内容已保留。请稍后重新启动。'), { code: 'RECOVERY_GUARD_UNAVAILABLE' });
+    }
+  }
+
   async finishSaveMetadata() {
     this.saveMetadataPending = true;
     try {
       await this.remember();
       await this.clearRecovery();
+      await fs.rm(this.deletionPath, { force: true });
       this.saveMetadataPending = false;
     } catch { /* Content is already on disk; retain the journal and retry metadata on the next save. */ }
   }
@@ -489,32 +535,55 @@ export class LocalStore {
       const activeRemoved = affected(this.current?.path);
       await this.loadOrder();
 
+      let recoveryContent, recovery;
+      try { recoveryContent = await fs.readFile(this.recoveryPath, 'utf8'); }
+      catch (error) { if (error.code !== 'ENOENT') throw new Error('暂时无法读取恢复记录，文件尚未删除。请稍后重试。'); }
+      if (recoveryContent) { try { recovery = JSON.parse(recoveryContent); } catch {} }
+      const discardingRecovery = recovery && affected(recovery.path);
+      const hash = discardingRecovery ? recoveryHash(recoveryContent) : null;
+      let protectionCreated = false;
+      const previousDeletion = activeRemoved || discardingRecovery ? await this.deletedRecovery() : null;
+      const alreadyProtected = discardingRecovery && (this.state.discardedRecoveryHash === hash || previousDeletion?.recoveryHash === hash);
+      if ((activeRemoved || discardingRecovery) && !alreadyProtected) {
+        if (previousDeletion?.recoveryHash && recoveryContent !== undefined && previousDeletion.recoveryHash === recoveryHash(recoveryContent)) {
+          throw new Error('上次删除的恢复记录尚未处理完成。文件尚未删除，请稍后重新启动再试。');
+        }
+        // Record the intent before recycling. An interrupted/failed recycle keeps
+        // its journal recoverable while the original filesystem entry still exists.
+        try {
+          let workspaceHash = null;
+          try { workspaceHash = recoveryHash(await fs.readFile(this.statePath, 'utf8')); }
+          catch (error) { if (error.code !== 'ENOENT') throw error; }
+          const pending = { source: source.path, identity: fileIdentity(await fs.lstat(source.path)), recoveryHash: hash, ...(activeRemoved ? { activePath: this.current.path, workspaceHash } : {}) };
+          await atomicWrite(this.deletionPath, JSON.stringify(pending));
+        }
+        catch { throw new Error('暂时无法保护恢复记录，文件尚未删除。请稍后重试。'); }
+        protectionCreated = true;
+      }
+
       // Keep the session intact until Windows confirms that the item reached the recycle bin.
-      await trash(source.path);
+      try { await trash(source.path); }
+      catch (error) {
+        if (protectionCreated) await fs.rm(this.deletionPath, { force: true }).catch(() => {});
+        throw error;
+      }
       let notice = await this.maintainOrder(this.removeFromOrder(source), '已移入回收站，但列表顺序未能保存。');
       const positionNotice = '已移入回收站，但位置记录未能保存，请重新打开导图或继续编辑后保存。';
       this.state.recent = this.state.recent.filter(item => !affected(item.path));
       if (affected(this.state.current)) this.state.current = null;
-      try {
-        let recoveryContent, recovery;
-        try {
-          recoveryContent = await fs.readFile(this.recoveryPath, 'utf8');
-          recovery = JSON.parse(recoveryContent);
-        } catch {}
-        if (recovery && affected(recovery.path)) {
-          // Persist the exact discarded journal so failed cleanup cannot revive a deleted map.
-          // A subsequent, different recovery snapshot must still be recoverable.
-          this.state.discardedRecoveryHash = recoveryHash(recoveryContent);
-          await this.clearRecovery();
-        }
-      } catch { notice = positionNotice; }
+      if (discardingRecovery) this.state.discardedRecoveryHash = hash;
       // Establish a valid in-memory session before metadata IO, even if recording it fails.
       try {
+        let recorded = true;
         if (activeRemoved || this.current) {
           const session = activeRemoved ? await this.openEmpty() : await this.rememberSession();
-          if (session.notice) notice = `已移入回收站。${session.notice}`;
+          if (session.notice) { notice = `已移入回收站。${session.notice}`; recorded = false; }
         }
         else await atomicWrite(this.statePath, JSON.stringify(this.state, null, 2));
+        if (recorded && (discardingRecovery || protectionCreated)) {
+          if (discardingRecovery) await this.clearRecovery();
+          await fs.rm(this.deletionPath, { force: true });
+        }
       } catch { notice = positionNotice; }
       const library = await this.readLibrary();
       return { library, ...(activeRemoved ? { session: this.snapshot() } : {}), ...(notice ? { notice } : {}) };

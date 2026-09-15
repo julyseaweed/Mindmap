@@ -96,9 +96,9 @@ Additional interaction suites are available through the `test:*` scripts in `pac
 
 Click the font icon beside the light/dark toggle to switch between serif and sans-serif fonts across the app. Sans-serif uses NeverMind with a local Chinese font. The choice persists. PDF keeps the selected font; Mermaid follows Obsidian's font settings.
 
-英文使用随附的 URW Classico；中文优先使用本机安装的 PMingLiU，缺少时回退到系统衬线字体。PMingLiU 不随应用分发。
+衬线体模式下，英文使用随附的 URW Classico；中文优先使用本机安装的 PMingLiU，缺少时回退到系统衬线字体。PMingLiU 不随应用分发。
 
-URW Classico is bundled for Latin text. Chinese text uses locally installed PMingLiU when available, with a system serif fallback. PMingLiU is not distributed with the app.
+In serif mode, URW Classico is bundled for Latin text. Chinese text uses locally installed PMingLiU when available, with a system serif fallback. PMingLiU is not distributed with the app.
 
 URW Classico © 2000, 2013 (URW)++ Design & Development。随附字体说明仅允许非商业分发；字体适用其自身许可，不应视为应用源码许可的一部分。
 

@@ -13,6 +13,15 @@ including its restriction on commercial distribution. See the original
 版权归 (URW)++ Design & Development 所有，遵循随附 AFPL 许可及其商业分发限制；
 本项目未重新授权这些字体。
 
+## NeverMind
+
+The unmodified NeverMind Regular and Bold fonts are designed by Xmind and
+distributed under the [SIL Open Font License 1.1](assets/fonts/NeverMind-LICENSE.txt).
+See the [source and checksums](assets/fonts/NeverMind-SOURCE.txt).
+
+NeverMind 常规与粗体由 Xmind 设计，以 SIL OFL 1.1 许可原样随附；
+来源及校验值见上述文件。中文使用本机字体，不随应用分发。
+
 ## PMingLiU
 
 PMingLiU is loaded from the user's system when available. No PMingLiU font file

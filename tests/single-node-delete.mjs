@@ -30,6 +30,12 @@ original.nodes = {
   deep: { id: 'deep', text: '更深层图片保留', children: [], collapsed: false, images: [picture('deepPicture')] },
   after: { id: 'after', text: '后面的节点', children: [], collapsed: false },
 };
+original.relationships = [
+  { id: 'removeWithParent', sourceId: 'expanded', targetId: 'before', text: '' },
+  { id: 'retainedChildLink', sourceId: 'alpha', targetId: 'after', text: '', control1: { x: 80, y: -30 } },
+  { id: 'retainedHiddenLink', sourceId: 'deep', targetId: 'foldedB', text: '' },
+  { id: 'removeWithBranch', sourceId: 'betaHidden', targetId: 'after', text: '' },
+];
 await fs.mkdir(path.dirname(file), { recursive: true });
 await fs.mkdir(path.dirname(workspace), { recursive: true });
 await fs.writeFile(file, JSON.stringify(validateDocument(original), null, 2));
@@ -99,6 +105,7 @@ const onlyRemoved = (before, after, removedId, rootOrder) => {
   const expected = structuredClone(before);
   delete expected.nodes[removedId];
   expected.nodes.root.children = rootOrder;
+  expected.relationships = expected.relationships.filter(link => link.sourceId !== removedId && link.targetId !== removedId);
   assert.deepEqual(after, expected, '只删除该节点；子节点、图片、隐藏后代及其他内容均应原样保留');
 };
 const undoRedo = async (before, after, id) => {
@@ -129,6 +136,7 @@ try {
   await popup.getByRole('button', { name: /^删除单个节点/ }).click();
   let after = await saved(doc => !doc.nodes.expanded);
   onlyRemoved(original, after, 'expanded', ['before', 'alpha', 'beta', 'middle', 'folded', 'after']);
+  assert.deepEqual(after.relationships.map(link => link.id), ['retainedChildLink', 'retainedHiddenLink', 'removeWithBranch']);
   assert.equal(await node('alpha').getAttribute('aria-level'), '2');
   assert.equal(await node('beta').getAttribute('aria-level'), '2');
   assert.equal(await node('alpha').locator('[data-image-id="alphaPicture"]').count(), 1);
@@ -178,6 +186,7 @@ try {
   popup = await menu('beta');
   await popup.getByRole('button', { name: /^删除节点及分支/ }).click();
   removed = await saved(doc => !doc.nodes.beta && !doc.nodes.betaHidden);
+  assert.deepEqual(removed.relationships.map(link => link.id), ['retainedChildLink', 'retainedHiddenLink']);
   assert.equal(Object.keys(removed.nodes).length, Object.keys(persisted.nodes).length - 2);
   assert.ok(removed.nodes.alpha.images.length && removed.nodes.deep.images.length);
   await page.keyboard.press('Control+z');

@@ -404,7 +404,10 @@ export default function App() {
       // Remove only after the system clipboard has accepted the image.
       const current = docRef.current, node = current?.nodes[nodeId];
       if (!cut || !current || !node?.images || sessionRef.current?.token !== token) return;
-      if (!node.images.some(image => image.id === imageId)) return;
+      if (mediaGesture.current || drag.current?.active) throw new Error('导图正在调整，已保留原图片。请结束调整后重新剪切。');
+      const latestImage = node.images.find(image => image.id === imageId);
+      if (!latestImage) return;
+      if (latestImage !== image && JSON.stringify(latestImage) !== JSON.stringify(image)) throw new Error('图片刚刚发生了变化，已保留原图片。请重新剪切。');
       finishEdit();
       const nextNode: typeof node = { ...node, images: node.images.filter(image => image.id !== imageId) };
       if (!nextNode.images!.length) delete nextNode.images;
@@ -426,6 +429,7 @@ export default function App() {
       await api.copyBranch(branch);
       const current = docRef.current;
       if (!cut || !current?.nodes[nodeId] || sessionRef.current?.token !== token) return;
+      if (mediaGesture.current || drag.current?.active) throw new Error('导图正在调整，已保留原节点。请结束调整后重新剪切。');
       const unchanged = Object.entries(branch.nodes).every(([id, source]) => {
         const target = current.nodes[id];
         return target && source.text === target.text && source.collapsed === target.collapsed && source.children.join(',') === target.children.join(',')
@@ -435,7 +439,9 @@ export default function App() {
             return image.id === other.id && image.dataUrl === other.dataUrl && image.width === other.width && image.height === other.height;
           });
       });
-      if (!unchanged) throw new Error('节点内容刚刚发生了变化，已保留原节点。请重新剪切。');
+      const branchIds = new Set(Object.keys(branch.nodes));
+      const incidentRelationships = (document: MindDocument) => (document.relationships ?? []).filter(relationship => branchIds.has(relationship.sourceId) || branchIds.has(relationship.targetId));
+      if (!unchanged || JSON.stringify(incidentRelationships(before)) !== JSON.stringify(incidentRelationships(current))) throw new Error('节点内容刚刚发生了变化，已保留原节点。请重新剪切。');
       finishEdit();
       const result = deleteNode(current, nodeId);
       apply(result.doc, result.selectedId);

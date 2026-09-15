@@ -50,6 +50,10 @@ original.nodes = {
   betaNote: { id: 'betaNote', text: '新的问题', children: [], collapsed: false },
   gamma: { id: 'gamma', text: '另一个方向', children: [], collapsed: false },
 };
+original.relationships = [
+  { id: 'crossBranchLink', sourceId: 'alpha', targetId: 'gamma', text: '', control1: { x: 100, y: -45 }, control2: { x: 100, y: 45 } },
+  { id: 'hiddenLink', sourceId: 'hidden', targetId: 'betaNote', text: '隐藏联系' },
+];
 await fs.mkdir(maps, { recursive: true });
 await fs.writeFile(file, JSON.stringify(original, null, 2));
 await fs.mkdir(path.join(home, '.mindmap'), { recursive: true });
@@ -227,6 +231,8 @@ try {
   const stationaryBefore = await positions(['root', 'beta', 'betaNote', 'gamma']);
   const internalBefore = await edge('detail');
   const incomingBefore = await edge('alpha');
+  const relationshipLine = page.locator('.canvas [data-relationship-id="crossBranchLink"] .relationship-line');
+  const relationshipBefore = await relationshipLine.getAttribute('d');
   const beforeBytes = await fs.readFile(file, 'utf8');
   let start = await down(node('alpha'), { x: 20, y: 12 });
   const delta = await moveBy(start, 80, -35);
@@ -235,6 +241,7 @@ try {
   await expectDisplacement(stationaryBefore, { x: 0, y: 0 });
   const internalPreview = await edge('detail');
   const incomingPreview = await edge('alpha');
+  assert.notEqual(await relationshipLine.getAttribute('d'), relationshipBefore, '虚线联系应随节点拖动预览更新');
   for (const point of ['start', 'end']) {
     near(internalPreview[point].x - internalBefore[point].x, delta.x, '分支内连线横向跟随');
     near(internalPreview[point].y - internalBefore[point].y, delta.y, '分支内连线纵向跟随');
@@ -249,6 +256,7 @@ try {
   await page.keyboard.press('Escape');
   await page.mouse.up();
   await expectDisplacement(branchBefore, { x: 0, y: 0 });
+  assert.equal(await relationshipLine.getAttribute('d'), relationshipBefore, '取消节点拖动应恢复联系形状');
   assert.equal(await fs.readFile(file, 'utf8'), beforeBytes);
 
   stage = 'blank sibling gap reorder and single-step undo';
@@ -276,6 +284,7 @@ try {
   await page.mouse.up();
   await saved(doc => doc.nodes.beta.children.includes('alpha') && doc.nodes.root.children.join(',') === 'beta,gamma');
   const reparented = await readDoc();
+  assert.deepEqual(reparented.relationships, original.relationships, '移动节点不改变联系端点或控制点偏移');
   for (const id of ['alpha', 'detail', 'folded', 'hidden']) assert.deepEqual(reparented.nodes[id], original.nodes[id]);
   assert.equal(await node('hidden').count(), 0);
   await sameDepthAligned();
@@ -330,6 +339,7 @@ try {
   await page.mouse.up();
   await saved(doc => doc.nodes.alpha.images[0].width > picture.width + 15);
   const final = await readDoc();
+  assert.deepEqual(final.relationships, original.relationships, '调整图片和列宽保留全部联系');
   near(final.nodes.alpha.images[0].width / final.nodes.alpha.images[0].height, picture.width / picture.height, '图片角落仍然按比例缩放');
   assert.deepEqual(final.nodes.beta.children, reparented.nodes.beta.children);
   assert.equal(Object.keys(final.nodes).length, Object.keys(original.nodes).length);
