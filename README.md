@@ -60,6 +60,21 @@ No account is required, and the app works offline. Maps autosave as self-contain
 - **另存为只创建副本**，后续编辑仍保存到原工作导图；打开库外文件会导入独立副本，保留外部原件。
   **Save As creates a copy**; later edits still save to the working map. Opening an external file imports a separate copy and leaves the original untouched.
 
+## 导入 / Import
+
+“打开导图”也接受 Markdown（`.md`、`.markdown`）和 Mermaid（`.mmd`、`.mermaid`），转换后保存为导图库内的独立 `.mindmap`，原文件保持不变。
+
+Open also accepts Markdown (`.md`, `.markdown`) and Mermaid (`.mmd`, `.mermaid`). Imports become independent `.mindmap` files in the local library; source files stay unchanged.
+
+- Markdown 按标题、列表和正文建立层级，保留表格文字及 Mermaid 代码块；多个图也会保留。图片保留为文字引用，不读取外部图片。
+  Markdown imports headings, lists, prose, table text, and Mermaid blocks, including multiple diagrams. Images remain text references; external images are not loaded.
+- Mermaid 支持常见 `flowchart` / `graph` 和 `mindmap`，交叉或虚线连线转换为联系，使用本应用的外形与排版。暂不支持子图、自环、时序图等内容；遇到不支持的语法会明确报错，不会生成缺少内容的导图。
+  Mermaid supports conventional `flowchart` / `graph` and `mindmap` diagrams. Cross-connections and dashed edges become relationships, using the app's appearance and layout. Unsupported constructs such as subgraphs, self-loops, and sequence diagrams produce an error rather than a partial import.
+
+`.mindmap` 是本应用的完整 JSON 编辑存档；Mermaid 是图的文本描述，不包含图片、列宽等全部编辑信息。
+
+`.mindmap` is the app's complete JSON editing document. Mermaid is a textual diagram description and does not retain all editing details, such as images and column widths.
+
 ## 导出 / Exports
 
 | 格式 / Format | 内容 / Content |

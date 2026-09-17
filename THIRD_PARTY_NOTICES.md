@@ -22,6 +22,13 @@ See the [source and checksums](assets/fonts/NeverMind-SOURCE.txt).
 NeverMind 常规与粗体由 Xmind 设计，以 SIL OFL 1.1 许可原样随附；
 来源及校验值见上述文件。中文使用本机字体，不随应用分发。
 
+## Marked
+
+Marked 16.4.2 is used to tokenize Markdown as text, under the MIT license.
+Its original `LICENSE.md` is included with the packaged dependency.
+
+Marked 用于将 Markdown 解析为文本结构，遵循 MIT 许可；随安装包保留原许可文件。
+
 ## PMingLiU
 
 PMingLiU is loaded from the user's system when available. No PMingLiU font file

@@ -2,6 +2,7 @@ import { packager } from '@electron/packager';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { stageRuntime } from './stage-runtime.mjs';
 
 const project = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const release = path.join(project, 'release');
@@ -10,8 +11,7 @@ await fs.mkdir(release, { recursive: true });
 const releaseRoot = await fs.realpath(release);
 const stage = await fs.mkdtemp(path.join(releaseRoot, 'stage-'));
 for (const folder of ['dist', 'electron', 'assets']) await fs.cp(path.join(project, folder), path.join(stage, folder), { recursive: true, force: true });
-await fs.mkdir(path.join(stage, 'src'), { recursive: true });
-await fs.copyFile(path.join(project, 'src', 'core.mjs'), path.join(stage, 'src', 'core.mjs'));
+await stageRuntime(project, stage);
 const source = JSON.parse(await fs.readFile(path.join(project, 'package.json'), 'utf8'));
 await fs.writeFile(path.join(stage, 'package.json'), JSON.stringify({ name: source.name, productName: source.productName, version: source.version, description: source.description, author: source.author, license: source.license, main: source.main, type: 'module' }, null, 2));
 const version = JSON.parse(await fs.readFile(path.join(project, 'node_modules', 'electron', 'package.json'), 'utf8')).version;

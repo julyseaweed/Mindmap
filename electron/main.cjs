@@ -3,6 +3,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const { pathToFileURL } = require('node:url');
 const { createImageClipboard } = require('./clipboard.cjs');
+const { OPEN_EXTENSIONS, isSupportedFile } = require('./formats.cjs');
 
 const home = process.env.INKMAP_HOME || (app.isPackaged ? path.dirname(process.execPath) : path.join(app.getAppPath(), 'local-data'));
 fs.mkdirSync(path.join(home, '.mindmap', 'runtime'), { recursive: true });
@@ -28,7 +29,7 @@ const watchLibrary = () => {
   });
   libraryWatcher.on('error', error => { console.error('Library watcher:', error.message); stopLibraryWatcher(); });
 };
-const initialFile = process.argv.find(arg => arg.toLowerCase().endsWith('.mindmap'));
+const initialFile = process.argv.find(arg => path.isAbsolute(arg) && isSupportedFile(arg));
 const isDev = process.env.INKMAP_DEV === '1';
 
 if (!app.requestSingleInstanceLock()) app.quit();
@@ -37,7 +38,7 @@ else {
     if (!window) return;
     if (window.isMinimized()) window.restore();
     window.focus();
-    const file = argv.find(arg => arg.toLowerCase().endsWith('.mindmap'));
+    const file = argv.find(arg => path.isAbsolute(arg) && isSupportedFile(arg));
     if (file) window.webContents.send('document:open-request', file);
   });
   app.whenReady().then(async () => {
@@ -106,15 +107,15 @@ else {
     handle('library:arrange', (sourcePath, targetPath, position) => store.arrangeLibraryItem(sourcePath, targetPath, position));
     handle('document:open', async file => {
       if (file !== undefined && typeof file !== 'string') throw new Error('文件路径无效。');
-      if (file && store.containsLibraryPath(file)) await store.libraryPath(file, 'map');
+      if (file && store.containsLibraryPath(file)) await store.libraryPath(file, 'source');
       else if (file && !store.state.recent.some(item => item.path === file) && file !== initialFile) {
         // Paths received from a second launch are accepted only after the native picker confirms them.
-        const result = await dialog.showOpenDialog(window, { defaultPath: file, properties: ['openFile'], filters: [{ name: "Mindmap", extensions: ['mindmap'] }] });
+        const result = await dialog.showOpenDialog(window, { defaultPath: file, properties: ['openFile'], filters: [{ name: "Mindmap", extensions: [...OPEN_EXTENSIONS] }] });
         if (result.canceled) return null;
         file = result.filePaths[0];
       }
       if (!file) {
-        const result = await dialog.showOpenDialog(window, { defaultPath: store.maps, properties: ['openFile'], filters: [{ name: "Mindmap", extensions: ['mindmap'] }] });
+        const result = await dialog.showOpenDialog(window, { defaultPath: store.maps, properties: ['openFile'], filters: [{ name: "Mindmap", extensions: [...OPEN_EXTENSIONS] }] });
         if (result.canceled) return null;
         file = result.filePaths[0];
       }

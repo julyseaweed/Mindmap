@@ -2,6 +2,9 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { createDocument, validateDocument } from '../src/core.mjs';
+import { importTextDocument, MAX_IMPORT_BYTES } from '../src/document-import.mjs';
+import formats from './formats.cjs';
+const { isSupportedFile } = formats;
 
 export async function atomicWrite(file, content) {
   await fs.mkdir(path.dirname(file), { recursive: true });
@@ -209,7 +212,7 @@ export class LocalStore {
       if (!within(rootReal, await fs.realpath(cursor))) throw new Error('文件位置超出了导图库。');
     }
     const isMap = stat.isFile() && path.extname(absolute).toLowerCase() === '.mindmap';
-    if (kind === 'folder' ? !stat.isDirectory() : kind === 'map' ? !isMap : !stat.isDirectory() && !isMap) throw new Error('请选择有效的导图文件或文件夹。');
+    if (kind === 'folder' ? !stat.isDirectory() : kind === 'source' ? !stat.isFile() || !isSupportedFile(absolute) : kind === 'map' ? !isMap : !stat.isDirectory() && !isMap) throw new Error('请选择有效的导图文件或文件夹。');
     return { path: absolute, kind: stat.isDirectory() ? 'folder' : 'map' };
   }
 
@@ -351,10 +354,22 @@ export class LocalStore {
     }
   }
 
-  async writeNewLibraryFile(doc, { excludedPath = '', recovery = false } = {}) {
+  async writeNewLibraryFile(doc, { excludedPath = '', recovery = false, atomic = false } = {}) {
     await fs.mkdir(this.maps, { recursive: true });
     await this.libraryPath(this.maps, 'folder');
     const content = JSON.stringify(doc, null, 2);
+    if (atomic) {
+      const temporary = path.join(this.home, '.mindmap', `import-${randomUUID()}.tmp`);
+      await fs.mkdir(path.dirname(temporary), { recursive: true });
+      try {
+        await fs.writeFile(temporary, content, { encoding: 'utf8', flag: 'wx' });
+        for (;;) {
+          const file = await this.uniquePath(doc.title, this.maps, excludedPath);
+          try { await fs.link(temporary, file); return { path: file, content }; }
+          catch (error) { if (error.code !== 'EEXIST') throw error; }
+        }
+      } finally { await fs.rm(temporary, { force: true }).catch(() => {}); }
+    }
     for (;;) {
       const file = await this.uniquePath(doc.title, this.maps, excludedPath);
       if (recovery) await atomicWrite(this.recoveryPath, JSON.stringify({ path: file, doc }));
@@ -381,15 +396,22 @@ export class LocalStore {
 
   async openCurrent(file) {
     if (typeof file !== 'string' || !path.isAbsolute(file)) throw new Error('文件路径无效。');
-    if (this.containsLibraryPath(file)) await this.libraryPath(file, 'map');
-    if (path.extname(file).toLowerCase() !== '.mindmap') throw new Error('请选择 .mindmap 格式的导图文件。');
+    if (this.containsLibraryPath(file)) await this.libraryPath(file, 'source');
+    if (!isSupportedFile(file)) throw new Error('请选择 .mindmap、Markdown 或 Mermaid 格式的文件。');
+    const extension = path.extname(file).toLowerCase();
+    const isNative = extension === '.mindmap';
     const stat = await fs.stat(file);
-    if (stat.size > MAX_DOCUMENT_BYTES) throw new Error('文件过大，暂时无法打开。');
-    let raw = await fs.readFile(file, 'utf8');
-    const doc = validateDocument(JSON.parse(raw));
-    if (!this.containsLibraryPath(file)) {
+    if (!stat.isFile()) throw new Error('请选择有效的导图文件。');
+    if (stat.size > (isNative ? MAX_DOCUMENT_BYTES : MAX_IMPORT_BYTES)) throw new Error('文件过大，暂时无法打开。');
+    let raw;
+    const bytes = await fs.readFile(file);
+    if (bytes.length > (isNative ? MAX_DOCUMENT_BYTES : MAX_IMPORT_BYTES)) throw new Error('文件过大，暂时无法打开。');
+    try { raw = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes); }
+    catch { throw new Error('无法读取文件文字，请将文件保存为 UTF-8 编码后重试。'); }
+    const doc = isNative ? validateDocument(JSON.parse(raw.replace(/^\uFEFF/, ''))) : validateDocument(importTextDocument(raw, extension, path.basename(file, path.extname(file))));
+    if (!isNative || !this.containsLibraryPath(file)) {
       doc.id = 'n' + randomUUID().replaceAll('-', '');
-      const imported = await this.writeNewLibraryFile(doc);
+      const imported = await this.writeNewLibraryFile(doc, { atomic: true });
       file = imported.path;
       raw = imported.content;
     }
