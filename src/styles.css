@@ -87,6 +87,8 @@ kbd { font-family: var(--font-mono); color: var(--muted); font-size: 10px; font-
 .mind-node.relationship-target { outline: 1px dashed var(--node-ink); outline-offset: 5px; }
 .world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
 .connections { position: absolute; top: 0; left: 0; overflow: visible; pointer-events: none; }
+/* Keep full-width punctuation consistent with canvas measurements and textarea layout. */
+.mind-node, .relationship-label { text-spacing-trim: space-all; text-autospace: no-autospace; }
 .mind-node { position: absolute; border: var(--node-border-width) solid var(--node-ink); border-radius: 3px; background: var(--paper); color: var(--node-ink); display: flex; align-items: center; justify-content: center; padding: var(--node-padding-y) var(--node-padding-x); cursor: grab; touch-action: none; font-family: var(--font-node); font-size: var(--node-font-size); line-height: var(--node-line-height); }
 .mind-node.selected { box-shadow: inset 0 0 0 1.2px var(--node-ink); }
 .mind-node:hover:not(.selected) { box-shadow: inset 0 0 0 .35px var(--node-ink); }
@@ -95,8 +97,8 @@ kbd { font-family: var(--font-mono); color: var(--muted); font-size: 10px; font-
 .node-content > .node-text { width: 100%; }
 .node-text { display: block; text-align: center; pointer-events: none; white-space: pre; }
 .node-text > span { display: block; min-height: var(--node-line-height); }
-/* Match the character wrapping used by layoutTree so editing cannot hide a line. */
-.node-editor { width: 100%; padding: 0; margin: 0; outline: none; border: none; border-radius: 0; font: inherit; line-height: var(--node-line-height); color: var(--node-ink); background: var(--paper); resize: none; text-align: center; overflow: hidden; user-select: text; overflow-wrap: anywhere; word-break: break-all; }
+/* Prefer word boundaries and CJK punctuation rules; split only overlong tokens. */
+.node-editor { width: 100%; padding: 0; margin: 0; outline: none; border: none; border-radius: 0; font: inherit; line-height: var(--node-line-height); color: var(--node-ink); background: var(--paper); resize: none; text-align: center; overflow: hidden; user-select: text; white-space: pre-wrap; overflow-wrap: anywhere; word-break: normal; line-break: strict; }
 .collapse-button { width: 16px; height: 16px; position: absolute; right: -22px; top: calc(50% - 8px); border: 1px solid var(--node-ink); border-radius: 50%; background: var(--paper); color: var(--node-ink); display: flex; align-items: center; justify-content: center; padding: 0; opacity: 0; font-family: var(--font-mono); font-size: 9px; }
 .mind-node:hover .collapse-button, .mind-node.selected .collapse-button, .collapse-button.collapsed { opacity: 1; }
 .collapse-button.collapsed { min-width: 20px; width: auto; padding: 0 4px; right: -27px; border-radius: 8px; }

@@ -1,3 +1,5 @@
+import { wrapText } from './text-wrap.mjs';
+
 export const FORMAT = 'inkmap';
 const nodeStyle = {
   fontSize: 14, lineHeight: 23, borderWidth: 1, paddingX: 11, paddingY: 6,
@@ -348,22 +350,11 @@ export function toMermaid(doc, fenced = true) {
 export function layoutTree(doc, measure = text => [...text].reduce((width, char) => width + (/[^\u0000-\u00ff]/.test(char) ? 14 : 7.5), 0)) {
   const boxes = {};
   const maxWidth = [];
-  const wrap = (text, contentWidth = NODE_STYLE.maxAutoWidth - NODE_STYLE.insetX) => {
-    const lines = [];
-    for (const line of (text || ' ').split('\n')) {
-      let current = '';
-      for (const char of [...line]) {
-        if (current && measure(current + char) > contentWidth) { lines.push(current); current = ''; }
-        current += char;
-      }
-      lines.push(current || ' ');
-    }
-    return lines;
-  };
   // First determine the final width of each visible depth, including image constraints.
   for (const node of visibleNodes(doc)) {
     const minimum = node.id === doc.rootId ? NODE_STYLE.rootMinWidth : NODE_STYLE.minWidth;
-    const textWidth = Math.min(NODE_STYLE.maxAutoWidth, Math.max(...wrap(node.text).map(measure)) + NODE_STYLE.insetX);
+    // Size columns from unwrapped text, not shorter wrapped lines that would wrap again.
+    const textWidth = Math.min(NODE_STYLE.maxAutoWidth, Math.max(...node.text.split('\n').map(measure)) + NODE_STYLE.insetX);
     const requested = doc.columnWidths?.[String(node.depth)];
     const imageWidth = Math.max(0, ...(node.images ?? []).map(image => image.width + NODE_STYLE.insetX));
     maxWidth[node.depth] = Math.max(maxWidth[node.depth] || 0, minimum, requested ?? textWidth, imageWidth);
@@ -372,7 +363,7 @@ export function layoutTree(doc, measure = text => [...text].reduce((width, char)
     const node = doc.nodes[id];
     const width = maxWidth[depth];
     const images = (node.images ?? []).map(image => ({ id: image.id, width: image.width, height: image.height }));
-    const lines = !node.text && images.length ? [] : wrap(node.text, width - NODE_STYLE.insetX);
+    const lines = !node.text && images.length ? [] : wrapText(node.text, width - NODE_STYLE.insetX, measure);
     const textHeight = lines.length * NODE_STYLE.lineHeight;
     const imageHeight = images.reduce((height, image) => height + image.height, 0) + Math.max(0, images.length - 1) * NODE_STYLE.contentGap;
     const height = Math.max(NODE_STYLE.lineHeight, textHeight + imageHeight + (textHeight && images.length ? NODE_STYLE.contentGap : 0)) + NODE_STYLE.insetY;

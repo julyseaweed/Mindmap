@@ -138,7 +138,19 @@ export default function App() {
   const measure = useMemo(() => {
     const context = document.createElement('canvas').getContext('2d')!;
     context.font = `${NODE_STYLE.fontSize}px ${getComputedStyle(document.documentElement).getPropertyValue('--font-node').trim()}`;
-    return (text: string) => context.measureText(text).width;
+    const glyphWidths = new Map<string, number>();
+    // Canvas applies contextual CJK punctuation spacing but cannot opt out of it.
+    // Measure full-width glyphs separately to match CSS space-all; keep Latin kerning.
+    return (text: string) => text.split(/([\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\u3000-\u303f\uff00-\uffef])/u)
+      .reduce((width, run, index) => {
+        if (!run) return width;
+        if (index % 2 === 0) return width + context.measureText(run).width;
+        if (!glyphWidths.has(run)) {
+          if (glyphWidths.size >= 4096) glyphWidths.clear();
+          glyphWidths.set(run, context.measureText(run).width);
+        }
+        return width + glyphWidths.get(run)!;
+      }, 0);
   }, [font]);
   const displayedDoc = useMemo(() => {
     if (!doc || !mediaPreview) return doc;

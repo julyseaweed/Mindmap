@@ -17,7 +17,7 @@
   #pdf-export .mind-node::before, #pdf-export .mind-node::after { display: none !important; }
   #pdf-export .node-text { display: block !important; text-align: center !important; white-space: pre !important; color: #111111 !important; }
   #pdf-export .node-text > span { display: block !important; min-height: var(--node-line-height) !important; }
-  #pdf-export .pdf-textarea-fallback { width: 100% !important; white-space: pre-wrap !important; overflow-wrap: anywhere !important; }
+  #pdf-export .pdf-textarea-fallback { width: 100% !important; white-space: pre-wrap !important; overflow-wrap: anywhere !important; word-break: normal !important; line-break: strict !important; }
   #pdf-export button { display: none !important; }
   #pdf-export .node-image { outline: none !important; box-shadow: none !important; }
   #pdf-export .node-image img { filter: none !important; opacity: 1 !important; }

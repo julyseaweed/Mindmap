@@ -12,7 +12,7 @@
     "dev": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && vite build",
     "start": "electron .",
-    "test": "node --test tests/core.test.mjs tests/node-drag.test.mjs tests/relationships.test.mjs tests/relationship-geometry.test.mjs tests/storage.test.mjs tests/document-import.test.mjs tests/markdown-export.test.mjs tests/mermaid-import.test.mjs tests/import-storage.test.mjs",
+    "test": "node --test tests/core.test.mjs tests/text-wrap.test.mjs tests/node-drag.test.mjs tests/relationships.test.mjs tests/relationship-geometry.test.mjs tests/storage.test.mjs tests/document-import.test.mjs tests/markdown-export.test.mjs tests/mermaid-import.test.mjs tests/import-storage.test.mjs",
     "test:desktop": "node tests/desktop.mjs",
     "test:library": "node tests/library.mjs",
     "test:library-drag": "node tests/library-drag.mjs",
@@ -32,7 +32,8 @@
     "test:interactions": "node tests/interaction-boundaries.mjs",
     "test:save-copy": "node tests/save-copy.mjs",
     "package": "npm run build && node scripts/package.mjs",
-    "test:import": "node tests/import-desktop.mjs"
+    "test:import": "node tests/import-desktop.mjs",
+    "test:text-wrapping": "node tests/text-wrapping.mjs"
   },
   "dependencies": {
     "lucide-react": "1.42.0",

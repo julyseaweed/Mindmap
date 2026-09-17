@@ -120,6 +120,26 @@ test('invalid graphs, duplicate parents, unreachable nodes and excessive depth a
   assert.throws(() => validateDocument({}));
 });
 
+test('node layout keeps English words whole without changing explicit column widths or document text', () => {
+  const doc = createDocument();
+  doc.nodes.root.text = 'one simple word\n中文English中文';
+  doc.columnWidths = { 0: 152 };
+  const before = structuredClone(doc);
+  const layout = layoutTree(doc, text => [...text].length * 14);
+  assert.equal(layout.boxes.root.width, 152);
+  assert.deepEqual(layout.boxes.root.lines.map(line => line.trimEnd()), ['one', 'simple', 'word', '中文English', '中文']);
+  assert.equal(layout.boxes.root.height, 5 * 23 + 14);
+  assert.deepEqual(doc, before);
+});
+
+test('automatic columns retain the width cap when word boundaries leave shorter lines', () => {
+  const doc = createDocument();
+  doc.nodes.root.text = 'abcdefghijklmnop qrstuvwxyzabcdef';
+  const layout = layoutTree(doc, text => [...text].length * 10);
+  assert.equal(layout.boxes.root.width, 260);
+  assert.deepEqual(layout.boxes.root.lines.map(line => line.trimEnd()), ['abcdefghijklmnop', 'qrstuvwxyzabcdef']);
+});
+
 test('legacy validation keeps its old shape while new image and column fields round-trip without aliases', () => {
   const legacy = createDocument();
   assert.deepEqual(validateDocument(legacy), legacy);

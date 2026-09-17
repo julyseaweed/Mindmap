@@ -1,3 +1,5 @@
+import { wrapText } from './text-wrap.mjs';
+
 const labelPaddingX = 8;
 const labelPaddingY = 4;
 const labelMaxWidth = 280;
@@ -72,16 +74,8 @@ function union(a, b) {
 }
 
 function labelGeometry(text, point, measure) {
-  const lines = [];
-  for (const line of text.split('\n')) {
-    let current = '';
-    for (const char of line) {
-      if (current && measure(current + char) > labelMaxWidth - labelPaddingX * 2) { lines.push(current); current = ''; }
-      current += char;
-    }
-    lines.push(current);
-  }
-  const width = Math.max(text ? 24 : 96, Math.min(labelMaxWidth, Math.max(...lines.map(measure)) + labelPaddingX * 2));
+  const width = Math.max(text ? 24 : 96, Math.min(labelMaxWidth, Math.max(...text.split('\n').map(measure)) + labelPaddingX * 2));
+  const lines = wrapText(text, width - labelPaddingX * 2, measure);
   const height = Math.max(1, lines.length) * lineHeight + labelPaddingY * 2;
   return { x: point.x - width / 2, y: point.y - height / 2, width, height, lines };
 }
