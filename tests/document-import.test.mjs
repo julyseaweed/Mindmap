@@ -46,6 +46,19 @@ test('tables retain each cell and quoted prose remains text', () => {
   assert.equal(quote.text, '引用文字');
 });
 
+test('inline breaks and automatic links keep their visible text without extra URLs', () => {
+  const doc = read('# 笔记\n\n* 第一行<br>第二行<BR />第三行\n* www.example.com\n* a@example.com\n* https://example.com/path\n* &lt;br&gt;');
+  assert.deepEqual(children(doc).map(node => node.text), ['第一行\n第二行\n第三行', 'www.example.com', 'a@example.com', 'https://example.com/path', '<br>']);
+});
+
+test('a heading inside a list labels that item without introducing an empty parent', () => {
+  const doc = read('# 笔记\n\n* ## 章节\n  * 内容\n* 下一章');
+  const [chapter, next] = children(doc);
+  assert.equal(chapter.text, '章节');
+  assert.equal(next.text, '下一章');
+  assert.deepEqual(children(doc, chapter).map(node => node.text), ['内容']);
+});
+
 test('named HTML entities preserve exact visible characters and only decode once', () => {
   const doc = read('# Entities\n\n&Alpha; &alpha; &beta; &ndash; &hellip; &copy; &amp;alpha; `&alpha;`');
   assert.equal(children(doc)[0].text, 'Α α β – … © &alpha; &alpha;');

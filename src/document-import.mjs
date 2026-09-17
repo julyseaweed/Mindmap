@@ -6,10 +6,11 @@ import { decodeTextEntities } from './text-entities.mjs';
 export const MAX_IMPORT_BYTES = 4 * 1024 * 1024;
 const tooLarge = () => { throw new Error('文档内容过多，暂时无法转换为导图。请拆分后再打开。'); };
 const inlineText = tokens => (tokens ?? []).map(token => {
-  if (token.type === 'br') return '\n';
+  if (token.type === 'br' || (token.type === 'html' && /^<br\s*\/?\s*>$/i.test(token.raw))) return '\n';
   if (token.type === 'codespan' || token.type === 'escape') return token.text;
   if (token.type === 'link' || token.type === 'image') {
     const label = inlineText(token.tokens) || token.text || '';
+    if (token.type === 'link' && token.raw === token.text) return label;
     return !token.href || label === token.href ? label : `${label}${label ? ' ' : ''}(${token.href})`;
   }
   if (token.tokens) return inlineText(token.tokens);
@@ -72,9 +73,10 @@ function markdownDocument(source, filenameTitle) {
         for (const item of token.items) {
           const children = item.tokens.filter(token => !['space', 'def'].includes(token.type));
           const first = children[0];
-          const label = first && ['paragraph', 'text'].includes(first.type) ? inlineText(first.tokens) || first.text : '';
+          const hasLabel = first && ['paragraph', 'text', 'heading'].includes(first.type);
+          const label = hasLabel ? inlineText(first.tokens) || first.text : '';
           const id = add(current(), `${item.task ? (item.checked ? '☑ ' : '☐ ') : ''}${label}`);
-          blocks(label ? children.slice(1) : children, id, depth + 1);
+          blocks(hasLabel ? children.slice(1) : children, id, depth + 1);
         }
       } else if (token.type === 'blockquote') blocks(token.tokens, current(), depth + 1);
       else if (isMermaidBlock(token)) attachDiagram(current(), token.text);

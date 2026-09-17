@@ -16,6 +16,7 @@ const markdown = path.join(home, '外部笔记.md');
 const mermaid = path.join(home, '外部流程.mermaid');
 const internal = path.join(maps, '阅读文件夹', '文件夹里的笔记.markdown');
 const invalid = path.join(home, '不支持的图.mmd');
+const exportedOutline = path.join(home, '导出的层级大纲.md');
 const flowchart = 'flowchart LR\nA["阅读"] --> B["笔记"]\nA --> C["想法"]\nB -.->|"启发"| C\n';
 const markdownBytes = `# 阅读记录\n\n\`\`\`mermaid\n${flowchart}\`\`\`\n`;
 const internalBytes = '# 书单\n\n## 本周\n\n- 阅读第一章\n  - 记录问题\n';
@@ -37,6 +38,7 @@ const errors = [];
 const node = id => page.locator(`.canvas .mind-node[data-node-id="${id}"]`);
 const session = () => page.evaluate(() => window.inkmap.boot());
 const readDoc = async file => JSON.parse(await fs.readFile(file, 'utf8'));
+const textTree = (doc, id = doc.rootId) => ({ text: doc.nodes[id].text, children: doc.nodes[id].children.map(child => textTree(doc, child)) });
 const eventually = async (check, message) => {
   const deadline = Date.now() + 15000;
   while (Date.now() < deadline) {
@@ -175,6 +177,74 @@ try {
   assert.equal(await page.locator('.app-error, .save-error').count(), 0);
   assert.deepEqual(await menuLabels(), originalMenu);
 
+  stage = 'Markdown export writes a genuine outline including dirty multiline text and folded descendants';
+  const weekId = Object.values(internalResult.doc.nodes).find(item => item.text === '本周').id;
+  await node(weekId).click(); await node(weekId).focus(); await page.keyboard.press('Space');
+  await saved((_, doc) => doc.nodes[weekId].collapsed);
+  const rootId = internalResult.doc.rootId;
+  await node(rootId).click(); await node(rootId).focus(); await page.keyboard.press('F2');
+  const pendingRootText = '书单 & Reading\n第二行 *原样文字*';
+  await page.getByRole('textbox', { name: '编辑节点', exact: true }).fill(pendingRootText);
+  await app.evaluate(({ dialog }, target) => {
+    globalThis.__outlineSaveCalls = 0;
+    dialog.showSaveDialog = async () => { globalThis.__outlineSaveCalls++; return { canceled: false, filePath: target }; };
+  }, exportedOutline);
+  await page.getByRole('button', { name: '文件菜单', exact: true }).click();
+  await page.getByRole('button', { name: '导出为 Markdown', exact: true }).click();
+  await eventually(() => fs.stat(exportedOutline).then(stat => stat.size > 0, () => false), 'Markdown 大纲文件未导出');
+  const exportedSession = await saved((_, doc) => doc.nodes[rootId].text === pendingRootText);
+  assert.equal(exportedSession.token, internalResult.token);
+  assert.equal(exportedSession.path, internalResult.path);
+  assert.equal(exportedSession.doc.nodes[weekId].collapsed, true);
+  const outlineBytes = await fs.readFile(exportedOutline, 'utf8');
+  assert.match(outlineBytes, /^# /);
+  assert.match(outlineBytes, /\n\* 本周\n/);
+  assert.match(outlineBytes, /\n  \* 阅读第一章\n/);
+  assert.match(outlineBytes, /\n    \* 记录问题\n/);
+  assert.match(outlineBytes, /<br\s*\/?\s*>/);
+  assert.doesNotMatch(outlineBytes, /```mermaid|flowchart LR/);
+  assert.equal(await app.evaluate(() => globalThis.__outlineSaveCalls), 1);
+  assert.equal(await fs.readFile(internal, 'utf8'), internalBytes);
+
+  stage = 'cancelled Markdown export keeps native session and selection';
+  const beforeExportCancel = await session();
+  const beforeExportSelection = await selectedNode();
+  await app.evaluate(({ dialog }) => {
+    globalThis.__outlineSaveCalls = 0;
+    dialog.showSaveDialog = async () => { globalThis.__outlineSaveCalls++; return { canceled: true }; };
+  });
+  await page.getByRole('button', { name: '文件菜单', exact: true }).click();
+  await page.getByRole('button', { name: '导出为 Markdown', exact: true }).click();
+  await eventually(() => app.evaluate(() => globalThis.__outlineSaveCalls === 1), '未调用取消导出选择器');
+  await page.locator('.app:not(.busy)').waitFor();
+  assert.equal((await session()).token, beforeExportCancel.token);
+  assert.deepEqual((await session()).doc, beforeExportCancel.doc);
+  assert.equal(await selectedNode(), beforeExportSelection);
+  assert.equal(await fs.readFile(exportedOutline, 'utf8'), outlineBytes);
+
+  stage = 'Obsidian copy still uses Mermaid without touching the system clipboard';
+  await app.evaluate(({ ipcMain }) => {
+    globalThis.__copiedMermaid = null;
+    ipcMain.removeHandler('clipboard:copy');
+    ipcMain.handle('clipboard:copy', (_event, text) => { globalThis.__copiedMermaid = text; });
+  });
+  await page.locator('.copy-button').click();
+  const copied = await eventually(() => app.evaluate(() => globalThis.__copiedMermaid), '复制到 Obsidian 未生成 Mermaid');
+  assert.match(copied, /^```mermaid\n/);
+  assert.match(copied, /flowchart LR/);
+  assert.match(copied, /记录问题/);
+  assert.equal((await session()).token, exportedSession.token);
+
+  stage = 'reopening exported outline preserves exact text and tree with the exported file unchanged';
+  const roundTrip = await open(exportedOutline);
+  assert.notEqual(roundTrip.path, exportedOutline);
+  assert.equal(path.extname(roundTrip.path), '.mindmap');
+  assert.deepEqual(textTree(roundTrip.doc), textTree(exportedSession.doc));
+  assert.equal(await fs.readFile(exportedOutline, 'utf8'), outlineBytes);
+  assert.equal(await fs.readFile(internal, 'utf8'), internalBytes);
+  assert.equal(await page.locator('.app-error, .save-error').count(), 0);
+  assert.deepEqual(await menuLabels(), originalMenu);
+
   stage = 'startup and second-instance requests also accept imported formats';
   await close(); await launch(mermaid);
   const startup = await session();
@@ -192,7 +262,7 @@ try {
   assert.equal(await page.locator('.app-error, .save-error').count(), 0);
   assert.deepEqual(errors, []);
   await close();
-  console.log(JSON.stringify({ success: true, home, checks: ['existing menu and keyboard open', 'picker formats and cancel', 'dirty source saved before switch', 'Markdown and raw Mermaid import', 'editable nodes and relationships', 'native autosave and restart', 'invalid input preserves current selection', 'in-library Markdown import', 'startup and second-instance requests', 'original source bytes unchanged', 'no clipboard access'] }, null, 2));
+  console.log(JSON.stringify({ success: true, home, checks: ['existing menu and keyboard open', 'picker formats and cancel', 'dirty source saved before switch', 'Markdown and raw Mermaid import', 'editable nodes and relationships', 'native autosave and restart', 'invalid input preserves current selection', 'in-library Markdown import', 'genuine Markdown outline export', 'dirty multiline text and folded descendants exported', 'cancelled export preserves native session and selection', 'outline text and hierarchy roundtrip', 'Obsidian copy remains Mermaid via stub clipboard', 'startup and second-instance requests', 'original source bytes unchanged', 'no clipboard access'] }, null, 2));
 } catch (error) {
   console.error(`Import desktop test failed at: ${stage}`);
   throw error;

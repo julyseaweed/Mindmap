@@ -66,20 +66,21 @@ No account is required, and the app works offline. Maps autosave as self-contain
 
 Open also accepts Markdown (`.md`, `.markdown`) and Mermaid (`.mmd`, `.mermaid`). Imports become independent `.mindmap` files in the local library; source files stay unchanged.
 
-- Markdown 按标题、列表和正文建立层级，保留表格文字及 Mermaid 代码块；多个图也会保留。图片保留为文字引用，不读取外部图片。
-  Markdown imports headings, lists, prose, table text, and Mermaid blocks, including multiple diagrams. Images remain text references; external images are not loaded.
+- Markdown 按标题（`#`、`##` 等）和缩进列表建立节点层级，也保留正文与表格文字。图片保留为文字引用，不读取外部图片；兼容旧版导出的 Mermaid 代码块。
+  Markdown headings (`#`, `##`, etc.) and indented lists become the topic hierarchy; prose and table text are also retained. Images remain text references without loading external files. Older exports containing Mermaid blocks are accepted too.
 - Mermaid 支持常见 `flowchart` / `graph` 和 `mindmap`，交叉或虚线连线转换为联系，使用本应用的外形与排版。暂不支持子图、自环、时序图等内容；遇到不支持的语法会明确报错，不会生成缺少内容的导图。
   Mermaid supports conventional `flowchart` / `graph` and `mindmap` diagrams. Cross-connections and dashed edges become relationships, using the app's appearance and layout. Unsupported constructs such as subgraphs, self-loops, and sequence diagrams produce an error rather than a partial import.
 
-`.mindmap` 是本应用的完整 JSON 编辑存档；Mermaid 是图的文本描述，不包含图片、列宽等全部编辑信息。
+`.mindmap` 是本应用的完整 JSON 编辑存档；Markdown 是可阅读和编辑的分层大纲；Mermaid 是图的文本描述。后两者不包含图片、列宽等全部编辑信息。
 
-`.mindmap` is the app's complete JSON editing document. Mermaid is a textual diagram description and does not retain all editing details, such as images and column widths.
+`.mindmap` is the app's complete JSON editing document. Markdown is a readable, editable outline; Mermaid is a textual diagram description. Neither retains all editing details, such as images and column widths.
 
 ## 导出 / Exports
 
 | 格式 / Format | 内容 / Content |
 | --- | --- |
-| Mermaid / Markdown | 全部文字、树结构和虚线联系，包含折叠分支；不含图片和手调曲线形状。All text, structure, and dashed relationships, including folded branches; images and custom curve shapes are omitted. |
+| Markdown | 真正的分层大纲：根标题与缩进列表，包含折叠分支、空节点和节点内换行；不含图片、联系线和布局。A heading and nested lists, including folded branches, empty topics, and line breaks; images, relationships, and layout are omitted. |
+| Mermaid（复制到 Obsidian / Copy to Obsidian） | 全部文字、树结构和虚线联系，包含折叠分支；不含图片和手调曲线形状。All text, structure, and dashed relationships, including folded branches; images and custom curve shapes are omitted. |
 | PDF | 当前展开的完整导图，含图片，白底；不受画布缩放或平移影响。The complete expanded map with images, on white paper, independent of canvas zoom or pan. |
 
 Mermaid 使用 `flowchart LR`，不指定字体；Obsidian 会按自身主题和 Mermaid 配置重新布局。
@@ -125,4 +126,4 @@ NeverMind 由 Xmind 设计，以 SIL OFL 1.1 许可随附；中文搭配本机�
 
 NeverMind is designed by Xmind and bundled under SIL OFL 1.1. Chinese uses locally installed Microsoft YaHei or a system sans-serif fallback. See the [license](assets/fonts/NeverMind-LICENSE.txt) and [source](assets/fonts/NeverMind-SOURCE.txt).
 
-暂不支持 Mermaid 导入或 XMind 文件。 Mermaid import and XMind files are not supported.
+暂不支持 XMind 文件。 XMind files are not supported.

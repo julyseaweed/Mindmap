@@ -10,6 +10,7 @@ import { applyTheme } from './theme';
 import { applyFont } from './font';
 import type { AppFont } from './font';
 import { preparePdfExport } from './pdf-export';
+import { toMarkdown } from './markdown-export.mjs';
 import { readClipboardImage } from './clipboard-image';
 import NodeImageView from './NodeImageView';
 import NodeResizeHandle from './NodeResizeHandle';
@@ -777,11 +778,10 @@ export default function App() {
     try {
       await pasteQueue.current;
       const current = docRef.current;
-      const text = toMermaid(current);
-      if (destination === 'clipboard') await api.copy(text);
-      else await api.exportMarkdown(text, current.title);
+      if (destination === 'clipboard') await api.copy(toMermaid(current));
+      else await api.exportMarkdown(toMarkdown(current), current.title);
     } catch (error) {
-      showError(destination === 'clipboard' ? '复制失败，请使用文件菜单中的「导出为 Markdown」。' : (error as Error).message);
+      showError(destination === 'clipboard' ? '复制失败，请稍后重试。' : (error as Error).message);
     } finally { busyRef.current = false; setBusy(false); void refreshLibrary(); }
   };
   const copy = () => exportText('clipboard');
