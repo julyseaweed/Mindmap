@@ -886,7 +886,7 @@ export default function App() {
     }
   }, [layout, selected, relationshipEdit, doc?.relationships, size, fit, updateView, measure]);
 
-  useLayoutEffect(() => { if (edit && editor.current) { editor.current.focus(); editor.current.select(); } }, [edit]);
+  useLayoutEffect(() => { if (edit && editor.current) { editor.current.focus({ preventScroll: true }); editor.current.select(); } }, [edit]);
   useLayoutEffect(() => { if (renaming) { renameRef.current?.focus(); renameRef.current?.select(); } }, [renaming]);
 
   useEffect(() => {

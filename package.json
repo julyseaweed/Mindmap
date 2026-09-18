@@ -19,6 +19,7 @@
     "test:delete": "node tests/delete.mjs",
     "test:sidebar-resize": "node tests/sidebar-resize.mjs",
     "test:responsive": "node tests/responsive-canvas.mjs",
+    "test:canvas-viewport": "node tests/canvas-viewport.mjs",
     "test:theme": "node tests/theme.mjs",
     "test:font": "node tests/font.mjs",
     "test:relationships": "node tests/relationships.mjs",

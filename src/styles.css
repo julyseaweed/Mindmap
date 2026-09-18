@@ -80,7 +80,8 @@ kbd { font-family: var(--font-mono); color: var(--muted); font-size: 10px; font-
 .copy-button { margin-left: 6px; height: 36px; }
 .compact-copy { display: none; }
 .workspace { flex: 1; display: flex; overflow: hidden; min-height: 0; position: relative; }
-.canvas { flex: 1; position: relative; overflow: hidden; background: var(--paper); touch-action: none; user-select: none; min-width: 0; container-type: inline-size; container-name: canvas; }
+/* Only the world transform moves the map; focus must never scroll its controls. */
+.canvas { flex: 1; position: relative; overflow: clip; background: var(--paper); touch-action: none; user-select: none; min-width: 0; container-type: inline-size; container-name: canvas; }
 .canvas.panning { cursor: grabbing; }
 .canvas.dragging, .canvas.dragging * { cursor: grabbing !important; }
 .canvas.adding-relationship, .canvas.adding-relationship .mind-node { cursor: crosshair; }
