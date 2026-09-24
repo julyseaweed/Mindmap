@@ -6,8 +6,8 @@ A minimal, local-first mind map editor for Windows. Organize ideas with your key
 
 ## 功能 / Features
 
-- 从左向右展开，同层节点对齐；细框、曲线箭头与深浅色主题。
-  Left-to-right layout, aligned columns, thin borders, curved arrows, and light/dark themes.
+- 从左向右展开，同层节点对齐；细框、直线箭头与深浅色主题。
+  Left-to-right layout, aligned columns, thin borders, straight arrows, and light/dark themes.
 - 快捷键编辑、分支拖动、折叠、搜索、撤销与重做。
   Keyboard editing, branch dragging, folding, search, undo, and redo.
 - 节点之间可添加虚线联系，拖动曲线、输入横向联系文字。

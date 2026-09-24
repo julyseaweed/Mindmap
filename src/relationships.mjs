@@ -192,8 +192,7 @@ function routingScene(boxes, nodes) {
       const parent = boxes[parentId], child = boxes[childId];
       const start = { x: parent.x + parent.width, y: parent.y + parent.height / 2 };
       const end = { x: child.x - 2, y: child.y + child.height / 2 };
-      const bend = Math.max(35, (end.x - start.x) * .54);
-      return edgeSegments({ start, c1: { x: start.x + bend, y: start.y }, c2: { x: end.x - bend, y: end.y }, end }, `${parentId}>${childId}`);
+      return [{ a: start, b: end, id: `${parentId}>${childId}`, bounds: expand(segmentBounds(start, end), 5) }];
     });
     scene = { boxes, obstacles: spatialIndex(obstacles), tree, routes: new Map(), batches: new Map() };
     recentScenes.set(key, scene);

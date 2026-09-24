@@ -1175,8 +1175,7 @@ export default function App() {
               const x1 = previewParent ? previewParent.x + previewParent.width : from.x + from.width + fromOffset.x;
               const y1 = previewParent ? previewParent.y + previewParent.height / 2 : from.y + from.height / 2 + fromOffset.y;
               const x2 = to.x - 2 + toOffset.x, y2 = to.y + to.height / 2 + toOffset.y;
-              const bend = Math.max(35, (x2 - x1) * 0.54);
-              return <path key={id} data-edge-to={id} data-preview-parent={destinationParent ?? undefined} opacity={draggedNodes.has(id) ? .7 : 1} strokeDasharray={id === dragId ? '4 4' : undefined} d={`M${x1} ${y1} C${x1 + bend} ${y1},${x2 - bend} ${y2},${x2} ${y2}`} fill="none" stroke="var(--node-ink)" strokeWidth="1" markerEnd="url(#arrow)"/>;
+              return <path key={id} data-edge-to={id} data-preview-parent={destinationParent ?? undefined} opacity={draggedNodes.has(id) ? .7 : 1} strokeDasharray={id === dragId ? '4 4' : undefined} d={`M${x1} ${y1} L${x2} ${y2}`} fill="none" stroke="var(--node-ink)" strokeWidth="1" markerEnd="url(#arrow)"/>;
             }))}
           </svg>
           <RelationshipLayer key={session.token} relationships={doc.relationships ?? []} boxes={relationshipBoxes} context={displayedDoc ?? undefined} measure={measure} scale={view.scale}
