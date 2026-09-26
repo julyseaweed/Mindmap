@@ -1,4 +1,4 @@
-import type { MindDocument, MindNode } from './types';
+import type { MindDocument, MindNode, NodeImage } from './types';
 export const NODE_STYLE: Readonly<{
   fontSize: number; lineHeight: number; borderWidth: number; paddingX: number; paddingY: number;
   contentGap: number; minWidth: number; rootMinWidth: number; maxAutoWidth: number; maxWidth: number;
@@ -6,6 +6,10 @@ export const NODE_STYLE: Readonly<{
 }>;
 export function clone<T>(value: T): T;
 export function uid(): string;
+export function getTextSegments(node: MindNode): string[];
+export function updateTextSegment(node: MindNode, index: number, text: string): MindNode;
+export function insertNodeImages(node: MindNode, images: NodeImage[], position?: { segment: number; start: number; end: number }): MindNode;
+export function removeNodeImage(node: MindNode, id: string): MindNode;
 export function createDocument(title?: string): MindDocument;
 export function welcomeDocument(): MindDocument;
 export function validateDocument(value: unknown): MindDocument;
@@ -23,5 +27,6 @@ export function reorderNode(doc: MindDocument, id: string, direction: number): M
 export function visibleNodes(doc: MindDocument): (MindNode & { depth: number })[];
 export function escapeMermaid(text: string): string;
 export function toMermaid(doc: MindDocument, fenced?: boolean): string;
-export interface Box { id: string; depth: number; width: number; height: number; textHeight: number; lines: string[]; images?: { id: string; width: number; height: number }[]; span: number; x: number; y: number }
-export function layoutTree(doc: MindDocument, measure?: (text: string) => number): { boxes: Record<string, Box>; width: number; height: number };
+export type NodeContentBlock = { kind: 'text'; index: number; text: string; lines: string[]; height: number } | { kind: 'image'; id: string; width: number; height: number };
+export interface Box { id: string; depth: number; width: number; height: number; textHeight: number; lines: string[]; content: NodeContentBlock[]; images?: { id: string; width: number; height: number }[]; span: number; x: number; y: number }
+export function layoutTree(doc: MindDocument, measure?: (text: string) => number, editing?: { nodeId: string; segment: number }): { boxes: Record<string, Box>; width: number; height: number };

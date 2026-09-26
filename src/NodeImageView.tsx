@@ -21,9 +21,11 @@ interface NodeImageViewProps {
   onCut(): void;
   onPaste(): void;
   onRemove(): void;
+  onEditBefore(): void;
+  onEditAfter(): void;
 }
 
-export default function NodeImageView({ image, selected, scale, onSelect, onNodePointerDown, onDeselect, onResizeStart, onResizePreview, onResizeCommit, onResizeCancel, onCopy, onCut, onPaste, onRemove }: NodeImageViewProps) {
+export default function NodeImageView({ image, selected, scale, onSelect, onNodePointerDown, onDeselect, onResizeStart, onResizePreview, onResizeCommit, onResizeCancel, onCopy, onCut, onPaste, onRemove, onEditBefore, onEditAfter }: NodeImageViewProps) {
   const element = useRef<HTMLDivElement>(null);
   const menuElement = useRef<HTMLDivElement>(null);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
@@ -87,7 +89,9 @@ export default function NodeImageView({ image, selected, scale, onSelect, onNode
         if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229 || resizing) return;
         if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); remove(); }
         else if (event.key === 'Escape') { event.preventDefault(); setMenu(null); onDeselect?.(); }
-        else if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect(); }
+        else if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === 'ArrowDown')) { event.preventDefault(); onEditAfter(); }
+        else if (event.target === event.currentTarget && event.key === 'ArrowUp') { event.preventDefault(); onEditBefore(); }
+        else if (event.key === ' ') { event.preventDefault(); onSelect(); }
       }}>
       <img src={image.dataUrl} alt="节点图片" draggable={false}/>
       {selected && <div className={`node-image-resizer ${resizing ? 'is-resizing' : ''}`} role="slider" tabIndex={0} aria-label="调整图片尺寸" aria-valuemin={minimumWidth} aria-valuemax={maximumWidth} aria-valuenow={image.width} aria-valuetext={`${Math.round(image.width)} × ${Math.round(image.height)}`} {...resizeEvents}
@@ -115,6 +119,8 @@ export default function NodeImageView({ image, selected, scale, onSelect, onNode
         <button type="button" role="menuitem" aria-label="复制图片" aria-keyshortcuts="Control+C Meta+C" onClick={() => perform(onCopy)}><span>复制图片</span><kbd>Ctrl+C</kbd></button>
         <button type="button" role="menuitem" aria-label="剪切图片" aria-keyshortcuts="Control+X Meta+X" onClick={() => perform(onCut)}><span>剪切图片</span><kbd>Ctrl+X</kbd></button>
         <button type="button" role="menuitem" aria-label="粘贴图片" aria-keyshortcuts="Control+V Meta+V" onClick={() => perform(onPaste)}><span>粘贴图片</span><kbd>Ctrl+V</kbd></button>
+        <button type="button" role="menuitem" onClick={() => perform(onEditBefore)}>在图片上方输入</button>
+        <button type="button" role="menuitem" onClick={() => perform(onEditAfter)}>在图片下方输入</button>
         <button type="button" role="menuitem" aria-label="删除图片" aria-keyshortcuts="Delete" onClick={remove}><span>删除图片</span><kbd>Delete</kbd></button>
       </div>
     </div>, document.body)}

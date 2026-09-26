@@ -12,13 +12,17 @@ A minimal, local-first mind map editor for Windows. Organize ideas with your key
   Keyboard editing, branch dragging, folding, search, undo, and redo.
 - 节点之间可添加虚线联系，拖动曲线、输入横向联系文字。
   Connect nodes with adjustable dashed curves and horizontal relationship labels.
-- 粘贴图片、按比例缩放、调整整列宽度；支持跨导图复制节点和图片。
-  Paste and resize images, adjust column widths, and copy nodes or images between maps.
+- 在节点内交替放置文字和图片、按比例缩放图片、调整整列宽度；支持跨导图复制节点和图片。
+  Mix text and images in order within a node, resize images, adjust column widths, and copy nodes or images between maps.
 - 文件夹导图库与大纲侧栏，可拖动排序、移动和重命名。
   A folder-based library and outline, with drag-to-reorder, move, and rename.
 
 `Tab` 添加子节点 / add a child · `Enter` 添加同级节点 / add a sibling · `Shift + Enter` 换行 / line break.
 更多快捷键见应用文件菜单。 More shortcuts are available in the app's File menu.
+
+编辑文字时粘贴图片，会插入到光标处；选中图片后粘贴另一张图片，会接在它下方。图片右侧双击或选中图片后按 `Enter`，可在下方继续输入。图片右键菜单也可选择在上方或下方输入。
+
+Paste an image at the text cursor to insert it between text blocks, or select an image and paste another to place it below. Double-click beside an image, or select it and press `Enter`, to continue typing below it. The image context menu also lets you write above or below.
 
 ## 安装 / Install
 

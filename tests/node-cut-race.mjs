@@ -111,15 +111,39 @@ try {
   assert.deepEqual((await readDoc()).nodes.source.images, [resized], '剪切期间修改图片后必须保留新尺寸');
   await clearError();
 
-  stage = 'unrelated relationship edits do not block cutting source';
+  stage = 'preserve text moved below image while branch cut waits';
+  const beforeReorder = (await readDoc()).nodes.source;
   await fit(); await node('source').click({ position: { x: 8, y: 8 } });
+  await node('source').focus(); await page.keyboard.press('Control+x'); await waitCopy();
+  await node('source').locator('[data-text-segment="0"]').dblclick({ force: true });
+  const textEditor = page.getByRole('textbox', { name: '编辑节点', exact: true });
+  await textEditor.fill(''); await textEditor.press('Control+Enter');
+  await node('source').locator('.node-image').click(); await page.keyboard.press('Enter');
+  await textEditor.fill(beforeReorder.text); await textEditor.press('Control+Enter');
+  await eventually(async () => {
+    const current = (await readDoc()).nodes.source;
+    return current?.text === beforeReorder.text && current.textSegments?.[0] === '' && current.textSegments?.[1] === beforeReorder.text;
+  }, '图片上方文字移到下方后未保存原文字和新顺序');
+  await finishCopy();
+  await eventually(async () => await page.locator('.app-error').count() > 0 || !(await readDoc()).nodes.source, '图文顺序变化后的剪切未完成');
+  const reordered = (await readDoc()).nodes.source;
+  assert.ok(reordered, '文字不变但图文顺序变化后必须保留来源节点');
+  assert.equal(reordered.text, beforeReorder.text, '纯文本完全不变，保护应由图文分段比较触发');
+  assert.deepEqual(reordered.textSegments, ['', beforeReorder.text]);
+  assert.deepEqual(reordered.images, beforeReorder.images);
+  assert.deepEqual(reordered.children, beforeReorder.children);
+  await clearError();
+
+  stage = 'unrelated relationship edits do not block cutting source';
+  // The picture is now the first block; leave image selection before cutting the branch.
+  await fit(); await node('source').locator('.node-image').click(); await page.keyboard.press('Escape');
   await node('source').focus(); await page.keyboard.press('Control+x'); await waitCopy();
   await editLink('unrelated', '另一条联系的独立编辑'); await finishCopy();
   await eventually(async () => !(await readDoc()).nodes.source, '无关联系编辑不应阻止正常剪切');
   assert.equal((await readDoc()).relationships.find(link => link.id === 'unrelated')?.text, '另一条联系的独立编辑');
   assert.equal(await page.locator('.app-error, .save-error').count(), 0);
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ success: true, home, checks: ['internal and external link edits cancel stale cut', 'active image resize preview cancels cut', 'same-image resize cancels stale cut', 'unrelated link edits permit cut', 'no system clipboard access'] }, null, 2));
+  console.log(JSON.stringify({ success: true, home, checks: ['internal and external link edits cancel stale cut', 'active image resize preview cancels cut', 'same-image resize cancels stale cut', 'text moved across an image with unchanged plain text cancels stale cut', 'unrelated link edits permit cut', 'no system clipboard access'] }, null, 2));
 } catch (error) {
   console.error(`Cut race test failed at: ${stage}`, error);
   console.error(JSON.stringify({ home }));

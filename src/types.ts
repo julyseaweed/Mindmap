@@ -1,5 +1,5 @@
 export interface NodeImage { id: string; dataUrl: string; width: number; height: number; naturalWidth: number; naturalHeight: number }
-export interface MindNode { id: string; text: string; children: string[]; collapsed: boolean; images?: NodeImage[] }
+export interface MindNode { id: string; text: string; children: string[]; collapsed: boolean; images?: NodeImage[]; textSegments?: string[] }
 export interface MindRelationship { id: string; sourceId: string; targetId: string; text: string; control1?: { x: number; y: number }; control2?: { x: number; y: number } }
 export interface MindDocument { format: 'inkmap'; version: 1; id: string; title: string; rootId: string; nodes: Record<string, MindNode>; columnWidths?: Record<string, number>; relationships?: MindRelationship[] }
 export interface RecentFile { path: string; title: string; updatedAt: string }

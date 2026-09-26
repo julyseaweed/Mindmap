@@ -21,10 +21,57 @@ export const clone = value => {
   // Document fields are primitives apart from these containers; share immutable image strings.
   return { ...value, nodes: Object.fromEntries(Object.entries(value.nodes).map(([id, node]) => [id, {
     ...node, children: [...node.children], ...(node.images ? { images: node.images.map(image => ({ ...image })) } : {}),
+    ...(node.textSegments ? { textSegments: [...node.textSegments] } : {}),
   }])), ...(value.columnWidths ? { columnWidths: { ...value.columnWidths } } : {}),
     ...(value.relationships ? { relationships: value.relationships.map(cloneRelationship) } : {}) };
 };
 export const uid = () => 'n' + crypto.randomUUID().replaceAll('-', '');
+
+// Images separate text blocks visually; retain that boundary in text-only exports.
+const joinTextSegments = segments => segments.filter(text => text !== '').reduce((text, next) =>
+  text + (text && !text.endsWith('\n') && !next.startsWith('\n') ? '\n' : '') + next, '');
+
+export function getTextSegments(node) {
+  return node.textSegments ? [...node.textSegments] : [node.text, ...Array(node.images?.length ?? 0).fill('')];
+}
+
+function withTextSegments(node, segments, images = node.images ?? []) {
+  const text = joinTextSegments(segments);
+  if (text.length > 8000) throw new Error('文字过长，请分段粘贴到不同节点。');
+  const next = { ...node, text };
+  if (images.length) { next.images = images; next.textSegments = segments; }
+  else { delete next.images; delete next.textSegments; }
+  return next;
+}
+
+export function updateTextSegment(node, index, text) {
+  const segments = getTextSegments(node);
+  if (!Number.isInteger(index) || index < 0 || index >= segments.length || typeof text !== 'string') throw new Error('文字位置无效。');
+  segments[index] = text;
+  return withTextSegments(node, segments);
+}
+
+export function insertNodeImages(node, images, position) {
+  if (!images.length) return node;
+  const segments = getTextSegments(node);
+  const segment = position?.segment ?? segments.length - 1;
+  if (!Number.isInteger(segment) || segment < 0 || segment >= segments.length) throw new Error('图片插入位置无效。');
+  const text = segments[segment];
+  const start = position?.start ?? text.length, end = position?.end ?? start;
+  if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end < start || end > text.length) throw new Error('图片插入位置无效。');
+  const nextSegments = [...segments.slice(0, segment), text.slice(0, start), ...Array(images.length - 1).fill(''), text.slice(end), ...segments.slice(segment + 1)];
+  const previousImages = node.images ?? [];
+  const nextImages = [...previousImages.slice(0, segment), ...images.map(image => ({ ...image })), ...previousImages.slice(segment)];
+  return withTextSegments(node, nextSegments, nextImages);
+}
+
+export function removeNodeImage(node, id) {
+  const index = node.images?.findIndex(image => image.id === id) ?? -1;
+  if (index < 0) return node;
+  const segments = getTextSegments(node);
+  segments.splice(index, 2, joinTextSegments(segments.slice(index, index + 2)));
+  return withTextSegments(node, segments, node.images.filter(image => image.id !== id));
+}
 
 export function createDocument(title = '未命名导图') {
   return { format: FORMAT, version: 1, id: uid(), title, rootId: 'root', nodes: {
@@ -80,6 +127,12 @@ export function validateDocument(value) {
     if (Object.hasOwn(node, 'images')) {
       if (!Array.isArray(node.images) || node.images.length > 32) fail();
       nodes[id].images = node.images.map(validateImage);
+    }
+    if (Object.hasOwn(node, 'textSegments')) {
+      if (!Array.isArray(node.textSegments) || node.textSegments.length !== (node.images?.length ?? 0) + 1
+        || Array.from(node.textSegments).some(text => typeof text !== 'string' || text.length > 8000)
+        || joinTextSegments(node.textSegments) !== node.text) fail();
+      nodes[id].textSegments = [...node.textSegments];
     }
   }
   const seen = new Set();
@@ -207,6 +260,7 @@ export function pasteBranch(doc, targetId, branch) {
     next.nodes[id] = {
       ...node, id, children: node.children.map(child => ids.get(child)),
       ...(node.images ? { images: node.images.map(image => ({ ...image, id: freshId() })) } : {}),
+      ...(node.textSegments ? { textSegments: [...node.textSegments] } : {}),
     };
   }
   const selectedId = ids.get(source.rootId);
@@ -350,14 +404,14 @@ export function toMermaid(doc, fenced = true) {
   return fenced ? '```mermaid\n' + result + '\n```\n' : result;
 }
 
-export function layoutTree(doc, measure = text => [...text].reduce((width, char) => width + (/[^\u0000-\u00ff]/.test(char) ? 14 : 7.5), 0)) {
+export function layoutTree(doc, measure = text => [...text].reduce((width, char) => width + (/[^\u0000-\u00ff]/.test(char) ? 14 : 7.5), 0), editing) {
   const boxes = {};
   const maxWidth = [];
   // First determine the final width of each visible depth, including image constraints.
   for (const node of visibleNodes(doc)) {
     const minimum = node.id === doc.rootId ? NODE_STYLE.rootMinWidth : NODE_STYLE.minWidth;
     // Size columns from unwrapped text, not shorter wrapped lines that would wrap again.
-    const textWidth = Math.min(NODE_STYLE.maxAutoWidth, Math.max(...node.text.split('\n').map(measure)) + NODE_STYLE.insetX);
+    const textWidth = Math.min(NODE_STYLE.maxAutoWidth, Math.max(...getTextSegments(node).flatMap(text => text.split('\n')).map(measure)) + NODE_STYLE.insetX);
     const requested = doc.columnWidths?.[String(node.depth)];
     const imageWidth = Math.max(0, ...(node.images ?? []).map(image => image.width + NODE_STYLE.insetX));
     maxWidth[node.depth] = Math.max(maxWidth[node.depth] || 0, minimum, requested ?? textWidth, imageWidth);
@@ -366,14 +420,22 @@ export function layoutTree(doc, measure = text => [...text].reduce((width, char)
     const node = doc.nodes[id];
     const width = maxWidth[depth];
     const images = (node.images ?? []).map(image => ({ id: image.id, width: image.width, height: image.height }));
-    const lines = !node.text && images.length ? [] : wrapText(node.text, width - NODE_STYLE.insetX, measure);
-    const textHeight = lines.length * NODE_STYLE.lineHeight;
-    const imageHeight = images.reduce((height, image) => height + image.height, 0) + Math.max(0, images.length - 1) * NODE_STYLE.contentGap;
-    const height = Math.max(NODE_STYLE.lineHeight, textHeight + imageHeight + (textHeight && images.length ? NODE_STYLE.contentGap : 0)) + NODE_STYLE.insetY;
+    const content = getTextSegments(node).flatMap((text, index) => {
+      const reserveEmpty = !images.length || (editing?.nodeId === id && editing.segment === index);
+      const lines = text || reserveEmpty ? wrapText(text, width - NODE_STYLE.insetX, measure) : [];
+      const block = { kind: 'text', index, text, lines, height: lines.length * NODE_STYLE.lineHeight };
+      return images[index] ? [block, { kind: 'image', ...images[index] }] : [block];
+    });
+    const textBlocks = content.filter(block => block.kind === 'text');
+    const lines = textBlocks.flatMap(block => block.lines);
+    const textHeight = textBlocks.reduce((height, block) => height + block.height, 0);
+    const visibleContent = content.filter(block => block.height > 0);
+    const contentHeight = visibleContent.reduce((height, block) => height + block.height, 0) + Math.max(0, visibleContent.length - 1) * NODE_STYLE.contentGap;
+    const height = Math.max(NODE_STYLE.lineHeight, contentHeight) + NODE_STYLE.insetY;
     const children = node.collapsed ? [] : node.children;
     const childHeights = children.map(child => size(child, depth + 1));
     const span = Math.max(height, childHeights.reduce((a, b) => a + b, 0) + Math.max(0, children.length - 1) * 28);
-    boxes[id] = { id, depth, width, height, textHeight, lines, ...(images.length ? { images } : {}), span, x: 0, y: 0 };
+    boxes[id] = { id, depth, width, height, textHeight, lines, content, ...(images.length ? { images } : {}), span, x: 0, y: 0 };
     return span;
   };
   size(doc.rootId, 0);

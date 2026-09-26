@@ -4,7 +4,7 @@ import { ArrowDown, ArrowRight, ArrowUp, ChevronDown, ChevronRight, Copy, Scisso
 import type { LucideIcon } from 'lucide-react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import type { Box } from './core.mjs';
-import { NODE_STYLE, addNode, addRelationship, deleteRelationship, clone, copyBranch as extractBranch, pasteBranch as insertBranch, deleteNode, deleteNodeOnly, descendants, layoutTree, moveNode, parentOf, reorderNode, toMermaid, validateDocument, visibleNodes } from './core.mjs';
+import { NODE_STYLE, addNode, addRelationship, deleteRelationship, clone, copyBranch as extractBranch, pasteBranch as insertBranch, deleteNode, deleteNodeOnly, descendants, getTextSegments, updateTextSegment, insertNodeImages, removeNodeImage, layoutTree, moveNode, parentOf, reorderNode, toMermaid, validateDocument, visibleNodes } from './core.mjs';
 import type { LibraryEntry, LibraryMutation, LibrarySnapshot, MindDocument, MindRelationship, NodeImage, Session, Theme, View } from './types';
 import { applyTheme } from './theme';
 import { applyFont } from './font';
@@ -13,6 +13,7 @@ import { preparePdfExport } from './pdf-export';
 import { toMarkdown } from './markdown-export.mjs';
 import { readClipboardImage } from './clipboard-image';
 import NodeImageView from './NodeImageView';
+import NodeContent, { textSegmentAtPoint } from './NodeContent';
 import NodeResizeHandle from './NodeResizeHandle';
 import LibraryPanel from './LibraryPanel';
 import ResizableSidebar from './ResizableSidebar';
@@ -23,7 +24,7 @@ import { resolveNodeDrop } from './node-drag.mjs';
 import type { NodeDrop } from './node-drag.mjs';
 import appIcon from '../assets/icon.png';
 
-type Edit = { id: string; base: MindDocument; fresh: boolean };
+type Edit = { id: string; segment: number; base: MindDocument; fresh: boolean; caret?: number | 'end'; afterImagePaste?: boolean };
 type Snapshot = { doc: MindDocument; selected: string; relationship?: string };
 type RelationshipEdit = { id: string; base: MindDocument };
 type NodeDrag = { id: string; pointerId: number; x: number; y: number; active: boolean; view: View; doc: MindDocument; boxes: Record<string, Box> };
@@ -162,12 +163,8 @@ export default function App() {
   }, [doc, mediaPreview]);
   const layout = useMemo(() => {
     if (!displayedDoc) return null;
-    const editingNode = edit && displayedDoc.nodes[edit.id];
-    const source = editingNode && !editingNode.text && editingNode.images?.length
-      ? { ...displayedDoc, nodes: { ...displayedDoc.nodes, [editingNode.id]: { ...editingNode, text: ' ' } } }
-      : displayedDoc;
-    return layoutTree(source, measure);
-  }, [displayedDoc?.nodes, displayedDoc?.columnWidths, displayedDoc?.rootId, edit?.id, measure]);
+    return layoutTree(displayedDoc, measure, edit ? { nodeId: edit.id, segment: edit.segment } : undefined);
+  }, [displayedDoc?.nodes, displayedDoc?.columnWidths, displayedDoc?.rootId, edit?.id, edit?.segment, measure]);
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
   const visible = useMemo(() => displayedDoc ? visibleNodes(displayedDoc) : [], [displayedDoc]);
@@ -348,7 +345,8 @@ export default function App() {
     relationshipEditRef.current = null; setRelationshipEdit(null);
     const current = editRef.current;
     if (!current || !docRef.current) return;
-    if (!current.fresh && current.base.nodes[current.id]?.text !== docRef.current.nodes[current.id]?.text) pushHistory({ doc: current.base, selected: current.id });
+    const before = current.base.nodes[current.id], after = docRef.current.nodes[current.id];
+    if (!current.fresh && before && after && (before.text !== after.text || JSON.stringify(before.textSegments) !== JSON.stringify(after.textSegments))) pushHistory({ doc: current.base, selected: current.id });
     editRef.current = null;
     setEdit(null);
   };
@@ -401,9 +399,7 @@ export default function App() {
     const current = docRef.current, node = current?.nodes[nodeId];
     if (!current || !node?.images?.some(image => image.id === imageId) || busyRef.current) return;
     finishEdit();
-    const nextNode = { ...node };
-    nextNode.images = node.images.filter(image => image.id !== imageId);
-    if (!nextNode.images.length) delete nextNode.images;
+    const nextNode = removeNodeImage(node, imageId);
     apply({ ...current, nodes: { ...current.nodes, [nodeId]: nextNode } }, nodeId);
   };
 
@@ -423,8 +419,7 @@ export default function App() {
       if (!latestImage) return;
       if (latestImage !== image && JSON.stringify(latestImage) !== JSON.stringify(image)) throw new Error('图片刚刚发生了变化，已保留原图片。请重新剪切。');
       finishEdit();
-      const nextNode: typeof node = { ...node, images: node.images.filter(image => image.id !== imageId) };
-      if (!nextNode.images!.length) delete nextNode.images;
+      const nextNode = removeNodeImage(node, imageId);
       apply({ ...current, nodes: { ...current.nodes, [nodeId]: nextNode } }, nodeId);
       requestAnimationFrame(() => {
         if (sessionRef.current?.token === token && selectedRef.current === nodeId && document.activeElement === document.body) canvas.current?.querySelector<HTMLElement>(`[data-node-id="${nodeId}"]`)?.focus({ preventScroll: true });
@@ -446,7 +441,7 @@ export default function App() {
       if (mediaGesture.current || drag.current?.active) throw new Error('导图正在调整，已保留原节点。请结束调整后重新剪切。');
       const unchanged = Object.entries(branch.nodes).every(([id, source]) => {
         const target = current.nodes[id];
-        return target && source.text === target.text && source.collapsed === target.collapsed && source.children.join(',') === target.children.join(',')
+        return target && source.text === target.text && JSON.stringify(source.textSegments) === JSON.stringify(target.textSegments) && source.collapsed === target.collapsed && source.children.join(',') === target.children.join(',')
           && (source.images?.length ?? 0) === (target.images?.length ?? 0)
           && (source.images ?? []).every((image, index) => {
             const other = target.images![index];
@@ -468,6 +463,10 @@ export default function App() {
   const pasteContent = (nodeId = selectedRef.current, files: File[] = [], imageOnly = false) => {
     const token = sessionRef.current?.token;
     if (!docRef.current?.nodes[nodeId] || !token || busyRef.current || mediaGesture.current || drag.current?.active) return;
+    const activeEdit = editRef.current?.id === nodeId ? editRef.current : null;
+    const insertion = activeEdit && editor.current ? { segment: activeEdit.segment, start: editor.current.selectionStart, end: editor.current.selectionEnd } : null;
+    const originalNode = docRef.current.nodes[nodeId];
+    const besideImage = selectedImage?.nodeId === nodeId ? selectedImage.imageId : null;
     const availableWidth = (layoutRef.current?.boxes[nodeId]?.width ?? NODE_STYLE.maxAutoWidth) - NODE_STYLE.insetX;
     finishEdit(); setContext(null);
     pasteQueue.current = pasteQueue.current.then(async () => {
@@ -503,9 +502,22 @@ export default function App() {
       if (!current || !node || sessionRef.current?.token !== token) return;
       const existing = Object.values(current.nodes).flatMap(node => node.images ?? []);
       if ((node.images?.length ?? 0) + images.length > 32 || existing.length + images.length > 256 || [...existing, ...images].reduce((total, image) => total + image.dataUrl.length, 0) > 48 * 1024 * 1024) throw new Error('这张导图的图片已较多，请减少图片或另建一张导图。');
-      const next = validateDocument({ ...current, nodes: { ...current.nodes, [nodeId]: { ...node, images: [...(node.images ?? []), ...images] } } });
+      if (insertion && (JSON.stringify(getTextSegments(node)) !== JSON.stringify(getTextSegments(originalNode)) || node.images?.map(image => image.id).join(',') !== originalNode.images?.map(image => image.id).join(','))) {
+        throw new Error('粘贴位置的内容刚刚发生了变化，请重新粘贴。');
+      }
+      if (insertion && (selectedRef.current !== nodeId || (editRef.current && editRef.current.id !== nodeId))) throw new Error('编辑位置已切换，请在需要的位置重新粘贴。');
+      const imageIndex = besideImage ? node.images?.findIndex(image => image.id === besideImage) ?? -1 : -1;
+      const position = insertion ?? (imageIndex >= 0 ? { segment: imageIndex + 1, start: 0, end: 0 } : undefined);
+      const nextNode = insertNodeImages(node, images, position);
+      const next = validateDocument({ ...current, nodes: { ...current.nodes, [nodeId]: nextNode },
+        ...(nodeId === current.rootId && (current.title === '未命名导图' || current.title === titleFromText(node.text)) ? { title: titleFromText(nextNode.text) } : {}),
+      });
       finishEdit();
       apply(next, nodeId);
+      if (insertion) {
+        startEdit(nodeId, false, insertion.segment + images.length, 0, true);
+        return;
+      }
       const imageId = images[images.length - 1].id;
       setSelectedImage({ nodeId, imageId });
       requestAnimationFrame(() => {
@@ -514,13 +526,37 @@ export default function App() {
     }).catch(error => showError((error as Error).message.replace(/^Error invoking remote method '[^']+': Error: /, '')));
   };
 
-  const startEdit = (id = selectedRef.current, fresh = false) => {
+  const startEdit = (id = selectedRef.current, fresh = false, segment = 0, caret?: number | 'end', afterImagePaste = false) => {
     if (!docRef.current?.nodes[id] || busyRef.current) return;
     finishEdit();
     select(id);
-    const editing = { id, base: clone(docRef.current), fresh };
+    const editing = { id, segment: Math.max(0, Math.min(segment, docRef.current.nodes[id].images?.length ?? 0)), base: clone(docRef.current), fresh, caret, afterImagePaste };
     editRef.current = editing;
     setEdit(editing);
+  };
+
+  const updateNodeText = (id: string, segment: number, text: string) => {
+    const previous = docRef.current;
+    if (!previous?.nodes[id] || editRef.current?.id !== id || editRef.current.segment !== segment) return;
+    try {
+      const node = updateTextSegment(previous.nodes[id], segment, text);
+      const next = { ...previous, nodes: { ...previous.nodes, [id]: node } };
+      if (id === previous.rootId && (previous.title === '未命名导图' || previous.title === titleFromText(previous.nodes[id].text))) next.title = titleFromText(node.text);
+      rememberAnchor(); markChanged(next);
+    } catch (error) { showError((error as Error).message); }
+  };
+
+  const cancelNodeEdit = () => {
+    const editing = editRef.current, current = docRef.current;
+    editRef.current = null; setEdit(null);
+    const before = editing && editing.base.nodes[editing.id];
+    if (!editing || !before || !current?.nodes[editing.id]) return;
+    const node = { ...current.nodes[editing.id], text: before.text };
+    if (before.textSegments) node.textSegments = [...before.textSegments];
+    else delete node.textSegments;
+    const next = { ...current, nodes: { ...current.nodes, [editing.id]: node } };
+    if (editing.id === current.rootId) next.title = editing.base.title;
+    rememberAnchor(); markChanged(next);
   };
 
   const add = (kind: 'child' | 'sibling') => {
@@ -660,7 +696,7 @@ export default function App() {
     const nextDoc = next.doc;
     const root = nextDoc?.nodes[nextDoc.rootId];
     const editing = nextDoc && nextDoc.title === '未命名导图' && Object.keys(nextDoc.nodes).length === 1 && root?.text === '' && !root.images?.length
-      ? { id: nextDoc.rootId, base: clone(nextDoc), fresh: false } : null;
+      ? { id: nextDoc.rootId, segment: 0, base: clone(nextDoc), fresh: false } : null;
     editRef.current = editing;
     setSession(next);
     selectLibraryPath(next.path);
@@ -887,7 +923,15 @@ export default function App() {
     }
   }, [layout, selected, relationshipEdit, doc?.relationships, size, fit, updateView, measure]);
 
-  useLayoutEffect(() => { if (edit && editor.current) { editor.current.focus({ preventScroll: true }); editor.current.select(); } }, [edit]);
+  useLayoutEffect(() => {
+    if (!edit || !editor.current) return;
+    editor.current.focus({ preventScroll: true });
+    if (edit.caret === undefined) editor.current.select();
+    else {
+      const caret = edit.caret === 'end' ? editor.current.value.length : edit.caret;
+      editor.current.setSelectionRange(caret, caret);
+    }
+  }, [edit]);
   useLayoutEffect(() => { if (renaming) { renameRef.current?.focus(); renameRef.current?.select(); } }, [renaming]);
 
   useEffect(() => {
@@ -1194,48 +1238,45 @@ export default function App() {
             return <div key={node.id} data-node-id={node.id} role="treeitem" aria-label={node.text || '空白节点'} aria-selected={selected === node.id} aria-level={node.depth + 1} aria-expanded={node.children.length ? !node.collapsed : undefined} tabIndex={-1}
               className={`mind-node ${selected === node.id ? 'selected' : ''} ${isEditing ? 'editing' : ''} ${node.id === doc.rootId ? 'root-node' : ''} ${draggedNodes.has(node.id) ? 'drag-source' : ''} ${drop?.id === node.id ? 'drop-' + drop.position : ''} ${relationshipSource && relationshipPointer?.targetId === node.id && node.id !== relationshipSource ? 'relationship-target' : ''}`}
               style={{ left: box.x + offset.x, top: box.y + offset.y, width: box.width, height: box.height }}
-              onDoubleClick={e => { if ((e.target as HTMLElement).closest('button, .node-image, .node-resize-handle')) return; startEdit(node.id); }}
+              onDoubleClick={e => {
+                if ((e.target as HTMLElement).closest('textarea, button, .node-image, .node-resize-handle')) return;
+                startEdit(node.id, false, textSegmentAtPoint(e.currentTarget, e.clientY), node.images?.length ? 'end' : undefined);
+              }}
               onPointerDown={e => {
                 if (e.button !== 0 || (e.target as HTMLElement).closest('textarea, button, .node-image, .node-resize-handle') || busyRef.current) return;
                 beginNodeDrag(node.id, e);
               }}
               onDragStart={e => e.preventDefault()}
               onContextMenu={e => { e.preventDefault(); e.stopPropagation(); finishEdit(); select(node.id, false); setMenu(false); setContext({ x: Math.max(8, Math.min(e.clientX, window.innerWidth - 245)), y: Math.max(8, Math.min(e.clientY, window.innerHeight - 345)) }); }}>
-              <div className="node-content">
-              {isEditing ? <textarea ref={editor} aria-label="编辑节点" className="node-editor" spellCheck={false} maxLength={8000} value={node.text} style={{ height: Math.max(NODE_STYLE.lineHeight, box.textHeight) }} onPointerDown={e => e.stopPropagation()} onChange={e => {
-                const previous = docRef.current!;
-                const next = clone(previous);
-                next.nodes[node.id].text = e.target.value;
-                if (node.id === previous.rootId && (previous.title === '未命名导图' || previous.title === titleFromText(previous.nodes[node.id].text))) {
-                  next.title = titleFromText(e.target.value);
-                }
-                rememberAnchor(); markChanged(next);
-              }} onBlur={finishEdit} onKeyDown={e => {
+              <NodeContent node={node} box={box} editingSegment={isEditing ? edit.segment : null} editorRef={editor}
+                onTextChange={(segment, text) => updateNodeText(node.id, segment, text)} onFinishEdit={finishEdit} onEditorKeyDown={(e, segment) => {
                 if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
+                const editing = editRef.current;
+                if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z' && editing?.afterImagePaste
+                  && JSON.stringify(getTextSegments(editing.base.nodes[node.id])) === JSON.stringify(getTextSegments(docRef.current!.nodes[node.id]))) {
+                  e.preventDefault(); e.stopPropagation(); undo(); return;
+                }
                 if ((e.key === 'Delete' || e.key === 'Backspace') && !e.currentTarget.value && !e.ctrlKey && !e.metaKey && !e.altKey) {
                   e.preventDefault(); e.stopPropagation();
-                  if (!e.repeat && node.id !== docRef.current?.rootId) remove();
+                  const current = docRef.current?.nodes[node.id];
+                  if (!e.repeat && current && !current.text && !current.images?.length && node.id !== docRef.current?.rootId) remove();
                   return;
+                }
+                if (node.images?.length && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && e.currentTarget.selectionStart === e.currentTarget.selectionEnd) {
+                  if (e.key === 'ArrowUp' && e.currentTarget.selectionStart === 0 && segment > 0) { e.preventDefault(); startEdit(node.id, false, segment - 1, 'end'); return; }
+                  if (e.key === 'ArrowDown' && e.currentTarget.selectionEnd === e.currentTarget.value.length && segment < node.images.length) { e.preventDefault(); startEdit(node.id, false, segment + 1, 0); return; }
                 }
                 if (e.key === 'Tab') { e.preventDefault(); add('child'); }
                 if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (e.ctrlKey || e.metaKey) finishEdit(); else add('sibling'); }
-                if (e.key === 'Escape') {
-                  e.preventDefault(); const editing = editRef.current; editRef.current = null; setEdit(null);
-                  if (editing && docRef.current) {
-                    const next = clone(docRef.current); next.nodes[node.id].text = editing.base.nodes[node.id].text;
-                    if (node.id === next.rootId) next.title = editing.base.title;
-                    rememberAnchor(); markChanged(next);
-                  }
-                }
-              }}/> : (box.textHeight > 0 && <span className="node-text">{box.lines.map((line, index) => <span key={index}>{line}</span>)}</span>)}
-              {node.images?.map(image => <NodeImageView key={image.id} image={image} scale={view.scale} selected={selectedImage?.nodeId === node.id && selectedImage.imageId === image.id}
+                if (e.key === 'Escape') { e.preventDefault(); cancelNodeEdit(); }
+              }} renderImage={(image, index) => <NodeImageView key={image.id} image={image} scale={view.scale} selected={selectedImage?.nodeId === node.id && selectedImage.imageId === image.id}
                 onNodePointerDown={e => beginNodeDrag(node.id, e)}
                 onSelect={() => { finishEdit(); select(node.id, false); setSelectedImage({ nodeId: node.id, imageId: image.id }); setContext(null); setMenu(false); }}
+                onEditBefore={() => startEdit(node.id, false, index, 'end')} onEditAfter={() => startEdit(node.id, false, index + 1, 'end')}
                 onDeselect={() => { setSelectedImage(null); canvas.current?.querySelector<HTMLElement>(`[data-node-id="${node.id}"]`)?.focus({ preventScroll: true }); }} onRemove={() => removeImage(node.id, image.id)}
                 onCopy={() => copyImage(node.id, image.id)} onCut={() => copyImage(node.id, image.id, true)} onPaste={() => pasteContent(node.id, [], true)}
                 onResizeStart={() => beginMediaResize(node.id, image.id)} onResizePreview={size => previewMediaResize({ kind: 'image', nodeId: node.id, imageId: image.id, ...size })}
-                onResizeCommit={size => commitImageSize(node.id, image.id, size)} onResizeCancel={cancelMediaResize}/>) }
-              </div>
+                onResizeCommit={size => commitImageSize(node.id, image.id, size)} onResizeCancel={cancelMediaResize}/>}/>
               {selected === node.id && !isEditing && <NodeResizeHandle width={box.width} minWidth={Math.max(box.depth === 0 ? NODE_STYLE.rootMinWidth : NODE_STYLE.minWidth, ...visible.filter(item => item.depth === box.depth).flatMap(item => (item.images ?? []).map(image => image.width + NODE_STYLE.insetX)))} maxWidth={NODE_STYLE.maxWidth} scale={view.scale}
                 onStart={() => beginMediaResize(node.id)} onPreview={width => previewMediaResize({ kind: 'column', depth: box.depth, width })}
                 onCommit={width => commitColumnWidth(node.id, box.depth, width)} onCancel={cancelMediaResize}/>}

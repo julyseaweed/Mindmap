@@ -25,6 +25,7 @@
     "test:relationships": "node tests/relationships.mjs",
     "test:pdf": "node tests/pdf-export.mjs",
     "test:media": "node tests/node-media.mjs",
+    "test:mixed-content": "node tests/mixed-content.mjs",
     "test:clipboard": "node tests/node-clipboard.mjs",
     "test:cut-race": "node tests/node-cut-race.mjs",
     "test:node-drag": "node tests/node-drag.mjs",

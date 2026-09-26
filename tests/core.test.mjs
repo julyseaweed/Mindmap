@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { clone, createDocument, welcomeDocument, addNode, deleteNode, deleteNodeOnly, moveNode, parentOf, visibleNodes, toMermaid, layoutTree, validateDocument, descendants, reorderNode, copyBranch, pasteBranch } from '../src/core.mjs';
+import { clone, createDocument, welcomeDocument, addNode, deleteNode, deleteNodeOnly, moveNode, parentOf, visibleNodes, toMermaid, layoutTree, validateDocument, descendants, reorderNode, copyBranch, pasteBranch, getTextSegments, updateTextSegment, insertNodeImages, removeNodeImage } from '../src/core.mjs';
 
 const pngDataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aVFcAAAAASUVORK5CYII=';
 const nodeImage = (id = 'image1', overrides = {}) => ({ id, dataUrl: pngDataUrl, width: 200, height: 100, naturalWidth: 400, naturalHeight: 200, ...overrides });
@@ -201,6 +201,103 @@ test('supported image encodings and panoramic display dimensions are accepted, u
   duplicate.nodes.capture.images = [nodeImage('same')];
   duplicate.nodes.keep.images = [nodeImage('same')];
   assert.throws(() => validateDocument(duplicate));
+});
+
+test('legacy pictures keep their placement until a text block is edited', () => {
+  const doc = createDocument();
+  doc.nodes.root.text = '上方文字';
+  doc.nodes.root.images = [nodeImage('one'), nodeImage('two')];
+  const before = structuredClone(doc);
+  assert.deepEqual(getTextSegments(doc.nodes.root), ['上方文字', '', '']);
+  assert.deepEqual(validateDocument(doc), before);
+  const updated = updateTextSegment(doc.nodes.root, 1, '两图之间');
+  assert.deepEqual(updated.textSegments, ['上方文字', '两图之间', '']);
+  assert.equal(updated.text, '上方文字\n两图之间');
+  assert.deepEqual(doc, before);
+});
+
+test('pictures insert at the selected text range and support independent blocks on both sides', () => {
+  const doc = createDocument();
+  doc.nodes.root.text = 'Before SELECT After';
+  let node = insertNodeImages(doc.nodes.root, [nodeImage('one')], { segment: 0, start: 7, end: 13 });
+  assert.deepEqual(node.textSegments, ['Before ', ' After']);
+  assert.equal(node.text, 'Before \n After');
+  node = updateTextSegment(node, 1, 'Caption');
+  node = insertNodeImages(node, [nodeImage('two'), nodeImage('three')], { segment: 1, start: 0, end: 0 });
+  assert.deepEqual(node.images.map(image => image.id), ['one', 'two', 'three']);
+  assert.deepEqual(node.textSegments, ['Before ', '', '', 'Caption']);
+  node = updateTextSegment(node, 2, 'Middle');
+  assert.deepEqual(node.textSegments, ['Before ', '', 'Middle', 'Caption']);
+  assert.equal(node.text, 'Before \nMiddle\nCaption');
+  const appended = insertNodeImages(node, [nodeImage('four')]);
+  assert.deepEqual(appended.textSegments, ['Before ', '', 'Middle', 'Caption', '']);
+  assert.deepEqual(appended.images.map(image => image.id), ['one', 'two', 'three', 'four']);
+  assert.equal(doc.nodes.root.text, 'Before SELECT After');
+});
+
+test('removing pictures preserves every text block and existing newlines', () => {
+  const original = { ...createDocument().nodes.root, text: 'Top\n\nMiddle\nBottom', images: [nodeImage('one'), nodeImage('two')], textSegments: ['Top\n', '\nMiddle', 'Bottom'] };
+  const first = removeNodeImage(original, 'one');
+  assert.deepEqual(first.textSegments, ['Top\n\nMiddle', 'Bottom']);
+  assert.deepEqual(first.images.map(image => image.id), ['two']);
+  assert.equal(first.text, original.text);
+  const final = removeNodeImage(first, 'two');
+  assert.equal(final.text, original.text);
+  assert.equal(final.images, undefined);
+  assert.equal(final.textSegments, undefined);
+  assert.strictEqual(removeNodeImage(original, 'missing'), original);
+});
+
+test('mixed content validation, cloning and branch clipboard preserve order without array aliases', () => {
+  const doc = createDocument();
+  doc.nodes.root = insertNodeImages({ ...doc.nodes.root, text: '上下' }, [nodeImage('one')], { segment: 0, start: 1, end: 1 });
+  const before = structuredClone(doc);
+  const validated = validateDocument(doc), copied = clone(doc);
+  assert.deepEqual(validated, before);
+  validated.nodes.root.textSegments[0] = 'changed';
+  copied.nodes.root.textSegments[1] = 'changed';
+  assert.deepEqual(doc, before);
+  const branch = copyBranch(doc, 'root');
+  const target = createDocument();
+  const inserted = pasteBranch(target, 'root', branch);
+  const pasted = inserted.doc.nodes[inserted.selectedId];
+  assert.deepEqual(pasted.textSegments, ['上', '下']);
+  assert.equal(pasted.text, '上\n下');
+  assert.notEqual(pasted.images[0].id, doc.nodes.root.images[0].id);
+  pasted.textSegments[0] = 'other';
+  assert.deepEqual(branch.nodes.root.textSegments, ['上', '下']);
+  assert.deepEqual(doc, before);
+  assert.ok(toMermaid(doc).includes('上<br/>下'));
+});
+
+test('malformed mixed content and text exceeding the projected limit are rejected', () => {
+  const doc = createDocument();
+  doc.nodes.root = insertNodeImages({ ...doc.nodes.root, text: 'AB' }, [nodeImage('one')], { segment: 0, start: 1, end: 1 });
+  for (const textSegments of [null, 'A\nB', [], ['A'], ['A', 'B', ''], ['A', 2], ['different', 'B'], ['A'.repeat(8001), 'B']]) {
+    assert.throws(() => validateDocument({ ...doc, nodes: { root: { ...doc.nodes.root, textSegments } } }));
+  }
+  assert.throws(() => updateTextSegment(doc.nodes.root, 1, 'B'.repeat(8000)));
+  assert.throws(() => updateTextSegment(doc.nodes.root, 2, 'extra'));
+  assert.throws(() => insertNodeImages(doc.nodes.root, [nodeImage('two')], { segment: 0, start: 2, end: 2 }));
+  const full = { ...createDocument().nodes.root, text: 'A'.repeat(8000) };
+  assert.throws(() => insertNodeImages(full, [nodeImage('two')], { segment: 0, start: 4000, end: 4000 }));
+});
+
+test('mixed content layout wraps blocks separately and reserves only the active empty block', () => {
+  const doc = createDocument();
+  doc.nodes.root = insertNodeImages({ ...doc.nodes.root, text: 'AboveBelow' }, [nodeImage('one', { width: 120, height: 60 })], { segment: 0, start: 5, end: 5 });
+  doc.nodes.root = insertNodeImages(doc.nodes.root, [nodeImage('two', { width: 80, height: 40 })]);
+  const before = structuredClone(doc);
+  const box = layoutTree(doc).boxes.root;
+  assert.deepEqual(box.content.map(block => block.kind), ['text', 'image', 'text', 'image', 'text']);
+  assert.deepEqual(box.content.filter(block => block.kind === 'text').map(block => block.lines), [['Above'], ['Below'], []]);
+  assert.equal(box.textHeight, 42);
+  assert.equal(box.height, 42 + 60 + 40 + 3 * 8 + 6);
+  const editing = layoutTree(doc, undefined, { nodeId: 'root', segment: 2 }).boxes.root;
+  assert.equal(editing.content[4].height, 21);
+  assert.equal(editing.height, box.height + 21 + 8);
+  assert.equal(layoutTree(doc, undefined, { nodeId: 'other', segment: 2 }).boxes.root.height, box.height);
+  assert.deepEqual(doc, before);
 });
 
 test('image counts and serialized image byte budgets are enforced across all nodes', () => {

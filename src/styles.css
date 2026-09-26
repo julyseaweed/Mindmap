@@ -94,7 +94,9 @@ kbd { font-family: var(--font-mono); color: var(--muted); font-size: 10px; font-
 .mind-node.selected { box-shadow: inset 0 0 0 1.2px var(--node-ink); }
 .mind-node:hover:not(.selected) { box-shadow: inset 0 0 0 .35px var(--node-ink); }
 .mind-node.editing { cursor: text; }
-.node-content { width: 100%; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--node-content-gap); }
+.node-content { width: 100%; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.node-content > * { flex-shrink: 0; }
+.node-image-block { width: 100%; display: flex; justify-content: center; }
 .node-content > .node-text { width: 100%; }
 .node-text { display: block; text-align: center; pointer-events: none; white-space: pre; }
 .node-text > span { display: block; min-height: var(--node-line-height); }
