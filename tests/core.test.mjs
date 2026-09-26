@@ -128,7 +128,7 @@ test('node layout keeps English words whole without changing explicit column wid
   const layout = layoutTree(doc, text => [...text].length * 14);
   assert.equal(layout.boxes.root.width, 152);
   assert.deepEqual(layout.boxes.root.lines.map(line => line.trimEnd()), ['one simple', 'word', '中文English中', '文']);
-  assert.equal(layout.boxes.root.height, 4 * 23 + 6);
+  assert.equal(layout.boxes.root.height, 4 * 21 + 6);
   assert.deepEqual(doc, before);
 });
 
@@ -245,7 +245,7 @@ test('resizing a column rewraps every node in that column and recomputes row spa
   for (const id of ['capture', 'connect', 'keep']) {
     assert.equal(wide.boxes[id].width, 600);
     assert.equal(narrow.boxes[id].width, 112);
-    assert.equal(wide.boxes[id].textHeight, wide.boxes[id].lines.length * 23);
+    assert.equal(wide.boxes[id].textHeight, wide.boxes[id].lines.length * 21);
   }
   assert.ok(wide.boxes.capture.lines.length < before.boxes.capture.lines.length);
   assert.ok(narrow.boxes.capture.lines.length > before.boxes.capture.lines.length);
@@ -271,11 +271,11 @@ test('images impose column minimum width and stack below text without adding a b
   assert.deepEqual(first.images, [{ id: 'first', width: 320, height: 150 }, { id: 'second', width: 180, height: 40 }]);
   assert.equal(layout.boxes.connect.width, 332);
   assert.equal(layout.boxes.keep.width, 332);
-  assert.equal(layout.boxes.connect.height, 23 + 8 + 80 + 6);
+  assert.equal(layout.boxes.connect.height, 21 + 8 + 80 + 6);
   assert.equal(doc.nodes.capture.images[0].width, 320);
   const empty = createDocument();
   empty.nodes.root.text = '';
-  assert.equal(layoutTree(empty).boxes.root.textHeight, 23);
+  assert.equal(layoutTree(empty).boxes.root.textHeight, 21);
   const exported = toMermaid(doc);
   assert.ok(exported.includes('Text'));
   assert.ok(!exported.includes('data:image'));
