@@ -21,11 +21,11 @@ export function treeConnector(start, end, rootBranch = false) {
   const x = (start.x + end.x) / 2;
   const radius = Math.min(8, Math.abs(dx) / 2, Math.abs(dy) / 2);
   const rx = Math.sign(dx) * radius, ry = Math.sign(dy) * radius;
-  const a = { x: x - rx, y: start.y }, b = { x, y: start.y + ry };
+  const junction = { x, y: start.y };
   const c = { x, y: end.y - ry }, d = { x: x + rx, y: end.y };
-  const firstCorner = { x, y: start.y }, lastCorner = { x, y: end.y };
+  const lastCorner = { x, y: end.y };
   return {
-    path: `${move} H ${a.x} Q ${x} ${start.y}, ${b.x} ${b.y} V ${c.y} Q ${x} ${end.y}, ${d.x} ${d.y} H ${end.x}`,
-    curves: [line(start, a), quadratic(a, firstCorner, b), line(b, c), quadratic(c, lastCorner, d), line(d, end)],
+    path: `${move} H ${junction.x} V ${c.y} Q ${x} ${end.y}, ${d.x} ${d.y} H ${end.x}`,
+    curves: [line(start, junction), line(junction, c), quadratic(c, lastCorner, d), line(d, end)],
   };
 }
