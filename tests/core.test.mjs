@@ -250,7 +250,7 @@ test('resizing a column rewraps every node in that column and recomputes row spa
   assert.ok(wide.boxes.capture.lines.length < before.boxes.capture.lines.length);
   assert.ok(narrow.boxes.capture.lines.length > before.boxes.capture.lines.length);
   assert.ok(wide.boxes.tab.x > before.boxes.tab.x);
-  assert.equal(wide.boxes.tab.x, wide.boxes.capture.x + 600 + 88);
+  assert.equal(wide.boxes.tab.x, wide.boxes.capture.x + 600 + 64);
   const siblings = ['capture', 'connect', 'keep'].map(id => narrow.boxes[id]);
   for (let index = 1; index < siblings.length; index++) assert.ok(siblings[index].y >= siblings[index - 1].y + siblings[index - 1].height + 28);
 });

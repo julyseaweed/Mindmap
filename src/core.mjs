@@ -378,7 +378,7 @@ export function layoutTree(doc, measure = text => [...text].reduce((width, char)
   };
   size(doc.rootId, 0);
   const columns = [0];
-  for (let i = 1; i < maxWidth.length; i++) columns[i] = columns[i - 1] + maxWidth[i - 1] + 88;
+  for (let i = 1; i < maxWidth.length; i++) columns[i] = columns[i - 1] + maxWidth[i - 1] + (i === 1 ? 88 : 64);
   const place = (id, top) => {
     const box = boxes[id];
     box.x = columns[box.depth];
