@@ -1240,7 +1240,7 @@ export default function App() {
               style={{ left: box.x + offset.x, top: box.y + offset.y, width: box.width, height: box.height }}
               onDoubleClick={e => {
                 if ((e.target as HTMLElement).closest('textarea, button, .node-image, .node-resize-handle')) return;
-                startEdit(node.id, false, textSegmentAtPoint(e.currentTarget, e.clientY), node.images?.length ? 'end' : undefined);
+                startEdit(node.id, false, textSegmentAtPoint(e.currentTarget, e.clientX, e.clientY), node.images?.length ? 'end' : undefined);
               }}
               onPointerDown={e => {
                 if (e.button !== 0 || (e.target as HTMLElement).closest('textarea, button, .node-image, .node-resize-handle') || busyRef.current) return;

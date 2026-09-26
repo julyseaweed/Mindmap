@@ -14,8 +14,8 @@ interface NodeContentProps {
   renderImage(image: NodeImage, index: number): ReactNode;
 }
 
-// Text beside a picture belongs after that picture; the space above it belongs before it.
-export function textSegmentAtPoint(node: HTMLElement, clientY: number) {
+// The left side of a picture edits the text before it; the right side edits the text after it.
+export function textSegmentAtPoint(node: HTMLElement, clientX: number, clientY: number) {
   let segment = 0;
   for (const block of node.querySelectorAll<HTMLElement>('.node-content > [data-content-kind]')) {
     const bounds = block.getBoundingClientRect();
@@ -23,7 +23,11 @@ export function textSegmentAtPoint(node: HTMLElement, clientY: number) {
     if (bounds.height <= 0) continue;
     if (clientY < bounds.top) return index;
     segment = block.dataset.contentKind === 'image' ? index + 1 : index;
-    if (clientY <= bounds.bottom) return segment;
+    if (clientY <= bounds.bottom) {
+      const picture = block.querySelector<HTMLElement>('.node-image');
+      if (picture && clientX < picture.getBoundingClientRect().left) return index;
+      return segment;
+    }
   }
   return segment;
 }

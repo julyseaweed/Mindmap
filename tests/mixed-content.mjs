@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
 import { createDocument } from '../src/core.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -15,6 +16,7 @@ const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHgAAABACAYAAADRTbMSA
 const picture = { id: 'picture', dataUrl: png, width: 120, height: 64, naturalWidth: 120, naturalHeight: 64 };
 const above = '图片上方的说明\nText above the image';
 const below = '图片下方也能继续记录\nText below the image';
+const imageSidesOnly = process.env.INKMAP_TEST_IMAGE_SIDES_ONLY === '1';
 const fixture = createDocument('图文顺序');
 fixture.columnWidths = { 1: 270 };
 fixture.nodes = {
@@ -24,6 +26,11 @@ fixture.nodes = {
   child: { id: 'child', text: '原有子节点', children: [], collapsed: false },
   target: { id: 'target', text: '复制到这里', children: [], collapsed: false },
 };
+if (imageSidesOnly) {
+  fixture.nodes.mixed.images.push({ ...picture, id: 'picture2' });
+  fixture.nodes.mixed.textSegments = [above, '', below];
+  fixture.nodes.mixed.text = `${above}\n${below}`;
+}
 await fs.mkdir(path.dirname(file), { recursive: true });
 await fs.mkdir(path.join(home, '.mindmap'), { recursive: true });
 await fs.writeFile(file, JSON.stringify(fixture));
@@ -63,6 +70,49 @@ const expectEditor = async (segment, value) => {
   assert.equal(await editor().evaluate(element => element.closest('[data-text-segment]')?.getAttribute('data-text-segment')), String(segment));
   assert.equal(await editor().inputValue(), value);
   assert.equal(await editor().evaluate(element => document.activeElement === element), true);
+};
+const editBesideImage = async (index, side) => {
+  const bounds = await node('mixed').boundingBox(), pictureBounds = await image('mixed', index).boundingBox();
+  assert.ok(bounds && pictureBounds, '测试图片必须在画布中可见');
+  const left = (bounds.x + pictureBounds.x) / 2;
+  const right = (pictureBounds.x + pictureBounds.width + bounds.x + bounds.width) / 2;
+  assert.ok(pictureBounds.x - bounds.x > 10 && bounds.x + bounds.width - pictureBounds.x - pictureBounds.width > 10, '图片两侧必须留有可双击的区域');
+  let x = side === 'left' || side === 'upper-left' ? left : right;
+  let y = pictureBounds.y + pictureBounds.height / 2;
+  if (['above', 'below', 'upper-left', 'lower-right'].includes(side)) {
+    const gap = await image('mixed', index).evaluate((element, above) => {
+      const block = element.closest('[data-content-kind="image"]');
+      const siblings = [...block.parentElement.children].filter(item => item.getBoundingClientRect().height > 0);
+      const index = siblings.indexOf(block);
+      const neighbor = siblings[index + (above ? -1 : 1)];
+      const picture = block.getBoundingClientRect(), outer = block.closest('.mind-node').getBoundingClientRect();
+      return above ? { start: neighbor?.getBoundingClientRect().bottom ?? outer.top, end: picture.top }
+        : { start: picture.bottom, end: neighbor?.getBoundingClientRect().top ?? outer.bottom };
+    }, side === 'above' || side === 'upper-left');
+    assert.ok(gap.end - gap.start > 2, '只在实际存在的图片上下空隙中双击');
+    y = (gap.start + gap.end) / 2;
+    if (side === 'above' || side === 'below') x = pictureBounds.x + pictureBounds.width / 2;
+  }
+  await page.mouse.dblclick(x, y);
+};
+const checkImageSides = async indexes => {
+  const before = (await readDoc()).nodes.mixed;
+  const segments = before.textSegments ?? [before.text, ...before.images.map(() => '')];
+  for (const percent of [100, 85]) {
+    await fit(); await page.locator('.zoom-value').click();
+    if (percent === 85) await page.getByRole('button', { name: '缩小', exact: true }).click();
+    assert.equal(await page.locator('.zoom-value').innerText(), `${percent}%`);
+    for (const index of indexes) for (const side of ['left', 'right', ...(percent === 85 && index === indexes.at(-1) ? ['above', 'below', 'upper-left', 'lower-right'] : [])]) {
+      await editBesideImage(index, side);
+      const segment = index + Number(['right', 'below', 'lower-right'].includes(side));
+      await expectEditor(segment, segments[segment]);
+      await editor().press('Control+End');
+      await page.keyboard.insertText(' 临时输入');
+      await editor().press('Escape');
+      await saved(doc => isDeepStrictEqual(doc.nodes.mixed, before));
+      assert.deepEqual((await readDoc()).nodes.mixed, before, `${percent}% 图片${index + 1}${side}侧编辑不能丢失其他文字或图片`);
+    }
+  }
 };
 const blocks = id => node(id).evaluate(element => [...element.querySelectorAll('[data-text-segment], .node-image')].map(block => {
   const rect = block.getBoundingClientRect();
@@ -131,6 +181,29 @@ const close = async () => {
 
 try {
   await launch();
+  if (imageSidesOnly) {
+    stage = 'first and adjacent second image side targeting at 100% and 85%';
+    await checkImageSides([0, 1]);
+    await editBesideImage(1, 'left');
+    await expectEditor(1, '');
+    const between = '两张图片之间新增文字\nText between adjacent pictures';
+    await editor().fill(between); await finishEdit();
+    await saved(doc => doc.nodes.mixed.textSegments?.[1] === between);
+    await editBesideImage(1, 'right');
+    await expectEditor(2, below);
+    const updatedBelow = below + '\n继续记录';
+    await editor().fill(updatedBelow); await finishEdit();
+    await saved(doc => doc.nodes.mixed.textSegments?.[2] === updatedBelow);
+    const beforeReopen = (await readDoc()).nodes.mixed;
+    assert.deepEqual(beforeReopen.textSegments, [above, between, updatedBelow]);
+    await close(); await launch();
+    assert.deepEqual((await readDoc()).nodes.mixed, beforeReopen);
+    await ordered('mixed', ['text', 'image', 'text', 'image', 'text']);
+    await noClipping();
+    assert.deepEqual(errors, []);
+    await close();
+    console.log(JSON.stringify({ success: true, home, checks: ['left/above/upper-left edits preceding text', 'right/below/lower-right edits following text', 'first and adjacent second images', '100% and 85% zoom', 'cancel preserves all original content', 'typed content survives reopening', 'no system clipboard access'] }, null, 2));
+  } else {
   stage = 'legacy image supports text below and above';
   assert.equal((await readDoc()).nodes.mixed.text, above);
   await imageMenu('在图片下方输入');
@@ -145,11 +218,8 @@ try {
   await editor().fill(changedAbove); await finishEdit();
   await saved(doc => doc.nodes.mixed.textSegments?.[0] === changedAbove);
 
-  stage = 'double-click beside an image and image Enter edit following text';
-  const bounds = await node('mixed').boundingBox(), pictureBounds = await image().boundingBox();
-  assert.ok(bounds && pictureBounds && bounds.x + bounds.width - pictureBounds.x - pictureBounds.width > 10);
-  await page.mouse.dblclick(bounds.x + bounds.width - 10, pictureBounds.y + pictureBounds.height / 2);
-  await expectEditor(1, below); await editor().press('Escape');
+  stage = 'double-click image sides targets preceding or following text at either zoom';
+  await checkImageSides([0]);
   await image().click(); await page.keyboard.press('Enter');
   await expectEditor(1, below); await editor().press('Escape');
 
@@ -241,6 +311,8 @@ try {
   await select('mixed'); await page.keyboard.press('Control+z');
   await saved(doc => doc.nodes.mixed.images?.length === 3);
   assert.deepEqual((await readDoc()).nodes.mixed, adjacent);
+  stage = 'both sides of consecutive pictures target their own neighboring text';
+  await checkImageSides([0, 1]);
 
   stage = 'saved content survives a complete restart';
   const savedNodes = (await readDoc()).nodes;
@@ -305,6 +377,7 @@ try {
   assert.equal(await page.locator('.app-error, .save-error').count(), 0);
   await close();
   console.log(JSON.stringify({ success: true, home, pdf, checks: ['legacy document', 'text above and below images', 'image-side double-click and Enter', 'whole branch clipboard', 'image copy/cut/delete and undo', 'caret insertion with immediate undo/redo', 'paste below images and continue typing', 'empty segment Delete and Escape', 'save and reopen', 'both fonts and themes', 'real white PDF with ordered blocks', 'no system clipboard access'] }, null, 2));
+  }
 } catch (error) {
   console.error(`Mixed-content test failed at: ${stage}`);
   console.error(JSON.stringify({ home, pdf }));

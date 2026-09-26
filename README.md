@@ -20,9 +20,9 @@ A minimal, local-first mind map editor for Windows. Organize ideas with your key
 `Tab` 添加子节点 / add a child · `Enter` 添加同级节点 / add a sibling · `Shift + Enter` 换行 / line break.
 更多快捷键见应用文件菜单。 More shortcuts are available in the app's File menu.
 
-编辑文字时粘贴图片，会插入到光标处；选中图片后粘贴另一张图片，会接在它下方。图片右侧双击或选中图片后按 `Enter`，可在下方继续输入。图片右键菜单也可选择在上方或下方输入。
+编辑文字时粘贴图片，会插入到光标处；选中图片后粘贴另一张图片，会接在它下方。双击图片左侧或上方，在图片前输入；双击右侧或下方，在图片后输入。选中图片后按 `Enter` 可在下方继续输入，图片右键菜单也提供上下方输入选项。
 
-Paste an image at the text cursor to insert it between text blocks, or select an image and paste another to place it below. Double-click beside an image, or select it and press `Enter`, to continue typing below it. The image context menu also lets you write above or below.
+Paste an image at the text cursor to insert it between text blocks, or select an image and paste another to place it below. Double-click to the left of or above an image to type before it; double-click to the right of or below it to type after it. Selecting an image and pressing `Enter` continues below it; the image context menu also offers both positions.
 
 ## 安装 / Install
 
