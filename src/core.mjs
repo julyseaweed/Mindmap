@@ -332,18 +332,19 @@ export function toMermaid(doc, fenced = true) {
   const visit = id => { order.push(id); doc.nodes[id].children.forEach(visit); };
   visit(doc.rootId);
   const ids = new Map(order.map((id, index) => [id, 'N' + index]));
-  const treeEdges = order.flatMap(id => doc.nodes[id].children.map(child => `    ${ids.get(id)} --> ${ids.get(child)}`));
+  const treeEdges = order.flatMap(id => doc.nodes[id].children.map(child => ({ parent: id, line: `    ${ids.get(id)} --> ${ids.get(child)}` })));
+  const branchEdges = treeEdges.flatMap((edge, index) => edge.parent === doc.rootId ? [] : [index]);
   const lines = [
     '%%{init: {"theme":"base","themeVariables":{"primaryColor":"#ffffff","primaryTextColor":"#111111","primaryBorderColor":"#111111","lineColor":"#111111"},"flowchart":{"curve":"basis","nodeSpacing":26,"rankSpacing":80,"htmlLabels":true}}}%%',
     'flowchart LR',
     ...order.map(id => `    ${ids.get(id)}["${escapeMermaid(doc.nodes[id].text || ' ')}"]`),
     '',
-    ...treeEdges,
+    ...treeEdges.map(edge => edge.line),
     ...(doc.relationships ?? []).map(relationship => `    ${ids.get(relationship.sourceId)} -.->${relationship.text ? `|"${escapeMermaid(relationship.text).replaceAll('|', '#124;')}"|` : ''} ${ids.get(relationship.targetId)}`),
     '',
     '    classDef default fill:#ffffff,stroke:#111111,stroke-width:1px,color:#111111',
     '    linkStyle default stroke:#111111,stroke-width:1px',
-    ...(treeEdges.length ? [`    linkStyle ${treeEdges.map((_, index) => index).join(',')} interpolate linear`] : []),
+    ...(branchEdges.length ? [`    linkStyle ${branchEdges.join(',')} interpolate step`] : []),
   ];
   const result = lines.join('\n');
   return fenced ? '```mermaid\n' + result + '\n```\n' : result;

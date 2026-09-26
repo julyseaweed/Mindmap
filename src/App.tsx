@@ -18,6 +18,7 @@ import LibraryPanel from './LibraryPanel';
 import ResizableSidebar from './ResizableSidebar';
 import RelationshipLayer from './RelationshipLayer';
 import { relationshipBounds, relationshipGeometry } from './relationships.mjs';
+import { treeConnector } from './tree-connectors.mjs';
 import { resolveNodeDrop } from './node-drag.mjs';
 import type { NodeDrop } from './node-drag.mjs';
 import appIcon from '../assets/icon.png';
@@ -1175,7 +1176,8 @@ export default function App() {
               const x1 = previewParent ? previewParent.x + previewParent.width : from.x + from.width + fromOffset.x;
               const y1 = previewParent ? previewParent.y + previewParent.height / 2 : from.y + from.height / 2 + fromOffset.y;
               const x2 = to.x - 2 + toOffset.x, y2 = to.y + to.height / 2 + toOffset.y;
-              return <path key={id} data-edge-to={id} data-preview-parent={destinationParent ?? undefined} opacity={draggedNodes.has(id) ? .7 : 1} strokeDasharray={id === dragId ? '4 4' : undefined} d={`M${x1} ${y1} L${x2} ${y2}`} fill="none" stroke="var(--node-ink)" strokeWidth="1" markerEnd="url(#arrow)"/>;
+              const connector = treeConnector({ x: x1, y: y1 }, { x: x2, y: y2 }, (destinationParent ?? node.id) === doc.rootId);
+              return <path key={id} data-edge-to={id} data-preview-parent={destinationParent ?? undefined} opacity={draggedNodes.has(id) ? .7 : 1} strokeDasharray={id === dragId ? '4 4' : undefined} d={connector.path} fill="none" stroke="var(--node-ink)" strokeWidth="1" markerEnd="url(#arrow)"/>;
             }))}
           </svg>
           <RelationshipLayer key={session.token} relationships={doc.relationships ?? []} boxes={relationshipBoxes} context={displayedDoc ?? undefined} measure={measure} scale={view.scale}

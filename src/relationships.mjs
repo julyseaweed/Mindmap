@@ -1,4 +1,5 @@
 import { wrapText } from './text-wrap.mjs';
+import { treeConnector } from './tree-connectors.mjs';
 
 const labelPaddingX = 8;
 const labelPaddingY = 4;
@@ -175,16 +176,16 @@ function edgeSegments(geometry, id) {
 
 const scenesByBoxes = new WeakMap();
 const recentScenes = new Map();
-function routingScene(boxes, nodes) {
+function routingScene(boxes, nodes, rootId) {
   const previous = scenesByBoxes.get(boxes);
-  if (previous && previous.nodes === nodes) return previous.scene;
+  if (previous && previous.nodes === nodes && previous.rootId === rootId) return previous.scene;
   const entries = Object.entries(boxes);
   const links = [];
   for (const [id] of entries) if (!nodes?.[id]?.collapsed) {
     for (const child of nodes?.[id]?.children ?? []) if (boxes[child]) links.push([id, child]);
   }
   // Reusing identical geometry also covers immutable document updates while typing.
-  const key = JSON.stringify([entries.map(([id, box]) => [id, box.x, box.y, box.width, box.height]), links]);
+  const key = JSON.stringify([rootId, entries.map(([id, box]) => [id, box.x, box.y, box.width, box.height]), links]);
   let scene = recentScenes.get(key);
   if (!scene) {
     const obstacles = entries.map(([id, box]) => ({ id, box, bounds: expand(box, 12) }));
@@ -192,13 +193,17 @@ function routingScene(boxes, nodes) {
       const parent = boxes[parentId], child = boxes[childId];
       const start = { x: parent.x + parent.width, y: parent.y + parent.height / 2 };
       const end = { x: child.x - 2, y: child.y + child.height / 2 };
-      return [{ a: start, b: end, id: `${parentId}>${childId}`, bounds: expand(segmentBounds(start, end), 5) }];
+      const rootBranch = parentId === rootId;
+      const connector = treeConnector(start, end, rootBranch);
+      // Shared trunks count as one obstacle, regardless of the number of children.
+      const obstacleId = rootBranch ? `tree:${parentId}>${childId}` : `tree:${parentId}`;
+      return connector.curves.flatMap(curve => edgeSegments(curve, obstacleId));
     });
     scene = { boxes, obstacles: spatialIndex(obstacles), tree, routes: new Map(), batches: new Map() };
     recentScenes.set(key, scene);
     if (recentScenes.size > 8) recentScenes.delete(recentScenes.keys().next().value);
   }
-  scenesByBoxes.set(boxes, { nodes, scene });
+  scenesByBoxes.set(boxes, { nodes, rootId, scene });
   return scene;
 }
 
@@ -372,7 +377,7 @@ export function relationshipGeometry(relationship, boxes, measure = fallbackMeas
   if (!source || !target || source === target) return null;
   const label = labelGeometry(relationship.text, { x: 0, y: 0 }, measure);
   if (relationship.control1 && relationship.control2) return buildGeometry(relationship, boxes, label, defaultControls(source, target, label));
-  const scene = routingScene(boxes, context.nodes);
+  const scene = routingScene(boxes, context.nodes, context.rootId);
   let batch = routingBatch(scene, context.relationships ?? noRelationships, measure);
   const found = batch.geometries.get(relationship.id);
   if (found?.relationship === relationship) return found.geometry;

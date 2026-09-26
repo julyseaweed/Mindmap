@@ -6,8 +6,8 @@ A minimal, local-first mind map editor for Windows. Organize ideas with your key
 
 ## 功能 / Features
 
-- 从左向右展开，同层节点对齐；细框、直线箭头与深浅色主题。
-  Left-to-right layout, aligned columns, thin borders, straight arrows, and light/dark themes.
+- 从左向右展开，同层节点对齐；主标题用曲线连接一级节点，其余层级用圆角折线；支持深浅色主题。
+  Left-to-right layout with aligned columns, curved main branches, rounded elbow connectors below, and light/dark themes.
 - 快捷键编辑、分支拖动、折叠、搜索、撤销与重做。
   Keyboard editing, branch dragging, folding, search, undo, and redo.
 - 节点之间可添加虚线联系，拖动曲线、输入横向联系文字。
@@ -83,9 +83,9 @@ Open also accepts Markdown (`.md`, `.markdown`) and Mermaid (`.mmd`, `.mermaid`)
 | Mermaid（复制到 Obsidian / Copy to Obsidian） | 全部文字、树结构和虚线联系，包含折叠分支；不含图片和手调曲线形状。All text, structure, and dashed relationships, including folded branches; images and custom curve shapes are omitted. |
 | PDF | 当前展开的完整导图，含图片，白底；不受画布缩放或平移影响。The complete expanded map with images, on white paper, independent of canvas zoom or pan. |
 
-Mermaid 使用 `flowchart LR`，不指定字体；Obsidian 会按自身主题和 Mermaid 配置重新布局。
+Mermaid 使用 `flowchart LR`，不指定字体；主分支使用曲线，下级分支以折线近似本机的圆角连接。Obsidian 会按自身主题和 Mermaid 配置重新布局。
 
-Mermaid exports use `flowchart LR` without setting a font. Obsidian renders them using its theme and Mermaid configuration, so spacing and line breaks may differ.
+Mermaid exports use `flowchart LR` without setting a font, with curved main branches and stepped lower branches approximating the app's rounded connectors. Obsidian applies its own theme and layout.
 
 ## 开发 / Development
 

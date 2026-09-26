@@ -4,6 +4,7 @@ export interface Point { x: number; y: number }
 export interface RelationshipControls { control1: Point; control2: Point }
 export interface RelationshipBounds { x: number; y: number; width: number; height: number }
 export interface RelationshipRoutingContext {
+  rootId?: string;
   nodes?: Record<string, { children: string[]; collapsed?: boolean }>;
   relationships?: MindRelationship[];
 }
