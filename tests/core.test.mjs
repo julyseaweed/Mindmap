@@ -127,8 +127,8 @@ test('node layout keeps English words whole without changing explicit column wid
   const before = structuredClone(doc);
   const layout = layoutTree(doc, text => [...text].length * 14);
   assert.equal(layout.boxes.root.width, 152);
-  assert.deepEqual(layout.boxes.root.lines.map(line => line.trimEnd()), ['one', 'simple', 'word', '中文English', '中文']);
-  assert.equal(layout.boxes.root.height, 5 * 23 + 10);
+  assert.deepEqual(layout.boxes.root.lines.map(line => line.trimEnd()), ['one simple', 'word', '中文English中', '文']);
+  assert.equal(layout.boxes.root.height, 4 * 23 + 6);
   assert.deepEqual(doc, before);
 });
 
@@ -264,14 +264,14 @@ test('images impose column minimum width and stack below text without adding a b
   doc.nodes.connect.images = [nodeImage('third', { width: 100, height: 80 })];
   const layout = layoutTree(doc);
   const first = layout.boxes.capture;
-  assert.equal(first.width, 338);
+  assert.equal(first.width, 332);
   assert.equal(first.textHeight, 0);
   assert.deepEqual(first.lines, []);
-  assert.equal(first.height, 150 + 40 + 8 + 10);
+  assert.equal(first.height, 150 + 40 + 8 + 6);
   assert.deepEqual(first.images, [{ id: 'first', width: 320, height: 150 }, { id: 'second', width: 180, height: 40 }]);
-  assert.equal(layout.boxes.connect.width, 338);
-  assert.equal(layout.boxes.keep.width, 338);
-  assert.equal(layout.boxes.connect.height, 23 + 8 + 80 + 10);
+  assert.equal(layout.boxes.connect.width, 332);
+  assert.equal(layout.boxes.keep.width, 332);
+  assert.equal(layout.boxes.connect.height, 23 + 8 + 80 + 6);
   assert.equal(doc.nodes.capture.images[0].width, 320);
   const empty = createDocument();
   empty.nodes.root.text = '';
