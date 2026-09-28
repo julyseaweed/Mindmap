@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createDocument, welcomeDocument } from '../src/core.mjs';
+import { importTextDocument } from '../src/document-import.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const results = path.join(root, 'test-results');
@@ -264,7 +265,12 @@ try {
   await page.getByRole('button', { name: '文件菜单', exact: true }).click();
   await page.getByRole('button', { name: '导出为 Markdown', exact: true }).click();
   await page.waitForTimeout(400);
-  assert.ok((await fs.readFile(mdPath, 'utf8')).startsWith('```mermaid'));
+  const markdown = await fs.readFile(mdPath, 'utf8');
+  assert.ok(markdown.startsWith('# '));
+  assert.ok(!markdown.includes('```mermaid'), 'Markdown export must use a native heading/list outline.');
+  const importedOutline = importTextDocument(markdown, '.md', '导出检查');
+  const textTree = (doc, id = doc.rootId) => ({ text: doc.nodes[id].text, children: doc.nodes[id].children.map(child => textTree(doc, child)) });
+  assert.deepEqual(textTree(importedOutline), textTree(await readCurrent()), 'Markdown export retains every topic and its hierarchy.');
 
   // Close while text is still being edited, then relaunch from the same app directory.
   await page.locator('[data-node-id="root"]').dblclick();
