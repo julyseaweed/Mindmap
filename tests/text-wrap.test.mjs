@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { wrapText } from '../src/text-wrap.mjs';
+import { NODE_STYLE } from '../src/core.mjs';
 import { relationshipGeometry } from '../src/relationships.mjs';
 
 const segmenter = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' });
@@ -86,5 +87,5 @@ test('relationship labels use the same word wrapping and keep the full available
     control1: { x: 0, y: -100 }, control2: { x: 0, y: -100 } }, boxes, value => measure(value) * 10);
   assert.equal(geometry.label.width, 280);
   assert.deepEqual(visible(geometry.label.lines), ['English relationship words', 'stay together']);
-  assert.equal(geometry.label.height, 2 * 23 + 8);
+  assert.equal(geometry.label.height, 2 * NODE_STYLE.lineHeight + 8);
 });

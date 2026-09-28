@@ -1,10 +1,11 @@
 import { wrapText } from './text-wrap.mjs';
+import { NODE_STYLE } from './core.mjs';
 import { treeConnector } from './tree-connectors.mjs';
 
 const labelPaddingX = 8;
 const labelPaddingY = 4;
 const labelMaxWidth = 280;
-const lineHeight = 23;
+const lineHeight = NODE_STYLE.lineHeight;
 const fallbackMeasure = text => [...text].reduce((width, char) => width + (/[^\u0000-\u00ff]/.test(char) ? 14 : 7.5), 0);
 const center = box => ({ x: box.x + box.width / 2, y: box.y + box.height / 2 });
 const add = (a, b) => ({ x: a.x + b.x, y: a.y + b.y });
@@ -332,7 +333,8 @@ function routeControls(relationship, scene, label, edges, labels, prefix) {
 
 function reservedLabel(label) {
   // Reserve one full label from the start, so ordinary typing does not move it.
-  return { ...label, width: labelMaxWidth, height: Math.max(54, Math.ceil((label.height - labelPaddingY * 2) / 46) * 46 + labelPaddingY * 2) };
+  const twoLines = lineHeight * 2;
+  return { ...label, width: labelMaxWidth, height: Math.max(twoLines, Math.ceil((label.height - labelPaddingY * 2) / twoLines) * twoLines) + labelPaddingY * 2 };
 }
 
 const noRelationships = [];

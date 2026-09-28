@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { relationshipBounds, relationshipGeometry } from '../src/relationships.mjs';
-import { createDocument, layoutTree } from '../src/core.mjs';
+import { NODE_STYLE, createDocument, layoutTree } from '../src/core.mjs';
 
 const box = (id, x, y, width = 100, height = 40) => ({ id, x, y, width, height });
 const relation = { id: 'relation', sourceId: 'a', targetId: 'b', text: '' };
@@ -80,7 +80,7 @@ test('label wraps horizontally, preserves explicit newlines, and participates in
   assert.ok(result.label.lines.length >= 4);
   assert.equal(result.label.lines.join(''), text.replaceAll('\n', ''));
   assert.equal(result.label.lines.at(-1), '');
-  assert.equal(result.label.height, result.label.lines.length * 23 + 8);
+  assert.equal(result.label.height, result.label.lines.length * NODE_STYLE.lineHeight + 8);
   assert.ok(result.bounds.y <= result.label.y);
   assert.ok(result.bounds.x <= result.label.x);
   assert.ok(result.bounds.x + result.bounds.width >= result.label.x + result.label.width);

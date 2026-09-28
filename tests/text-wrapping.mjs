@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createDocument } from '../src/core.mjs';
+import { createDocument, NODE_STYLE } from '../src/core.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const results = path.join(root, 'test-results');
@@ -36,6 +36,7 @@ const errors = [];
 page.on('pageerror', error => errors.push(error.message));
 let stage = 'launch';
 const report = [];
+const expectedLineHeight = `${NODE_STYLE.lineHeight}px`;
 const node = id => page.locator(`.canvas .mind-node[data-node-id="${id}"]`);
 const lines = id => node(id).locator('.node-text > span').allTextContents();
 const normalized = values => values.map(value => value.replace(/\u00a0/g, ' ').trim());
@@ -68,6 +69,9 @@ const checkLines = async (locator, text, label) => {
     const lines = [...element.children].map(line => line.textContent);
     return {
       lines,
+      lineHeight: style.lineHeight,
+      containerLineHeight: getComputedStyle(element.closest('.mind-node, .relationship-label')).lineHeight,
+      lineHeights: [...element.children].map(line => getComputedStyle(line).height),
       width: parseFloat(style.width),
       widths: lines.map(line => context.measureText(line.trim()).width),
       words: [...new Set(element.textContent.match(/[A-Za-z]+/g) || [])].map(word => ({ word, width: context.measureText(word).width })),
@@ -75,6 +79,9 @@ const checkLines = async (locator, text, label) => {
     };
   });
   assert.equal(observed.lines.join('').replace(/\s/g, ''), text.replace(/\s/g, ''), `${label}: 换行不能更改正文`);
+  assert.equal(observed.lineHeight, expectedLineHeight, `${label}: 正文应使用共同的节点行高`);
+  assert.equal(observed.containerLineHeight, expectedLineHeight, `${label}: 容器与正文行高应一致`);
+  assert.ok(observed.lineHeights.every(height => height === expectedLineHeight), `${label}: 每行实际高度应与节点行高一致`);
   assert.equal(observed.overflow, false, `${label}: 正文不应裁切`);
   for (let i = 0; i < observed.lines.length; i++) {
     const line = observed.lines[i].trim();
@@ -117,7 +124,7 @@ const browserEditorLines = locator => locator.evaluate(editor => {
       lastTop = rect.top;
     }
     lines.push(current);
-    return { lines, starts, wordBreak: style.wordBreak, lineBreak: style.lineBreak, clipped: editor.scrollWidth > editor.clientWidth + 1 || editor.scrollHeight > editor.clientHeight + 1 };
+    return { lines, starts, lineHeight: style.lineHeight, wordBreak: style.wordBreak, lineBreak: style.lineBreak, clipped: editor.scrollWidth > editor.clientWidth + 1 || editor.scrollHeight > editor.clientHeight + 1 };
   } finally { mirror.remove(); }
 });
 const displayStarts = locator => locator.evaluateAll(spans => spans.filter(span => span.textContent.trim()).map(span => {
@@ -139,6 +146,7 @@ const checkEditor = async (id, expected) => {
   const editor = page.getByRole('textbox', { name: '编辑节点', exact: true });
   await editor.waitFor();
   const observed = await browserEditorLines(editor);
+  assert.equal(observed.lineHeight, expectedLineHeight, `${id}: 编辑器与节点显示应使用相同行高`);
   assert.equal(observed.wordBreak, 'normal');
   assert.equal(observed.lineBreak, 'strict');
   assert.equal(observed.clipped, false, `${id}: 编辑时不能裁切`);
@@ -198,6 +206,7 @@ try {
       await label.dblclick();
       const relationEditor = page.getByRole('textbox', { name: '编辑联系文字', exact: true });
       const editorLines = await browserEditorLines(relationEditor);
+      assert.equal(editorLines.lineHeight, expectedLineHeight, '联系编辑器与节点显示应使用相同行高');
       assert.equal(editorLines.wordBreak, 'normal');
       assert.equal(editorLines.lineBreak, 'strict');
       assert.equal(editorLines.clipped, false, '联系编辑器不能裁切');
@@ -222,6 +231,8 @@ try {
             background: getComputedStyle(host).backgroundColor,
             nodes: Object.fromEntries([...host.querySelectorAll('.mind-node')].map(node => [node.dataset.nodeId, [...node.querySelectorAll('.node-text > span')].map(line => line.textContent)])),
             relations: Object.fromEntries([...host.querySelectorAll('.relationship-label')].map(label => [label.dataset.relationshipId, [...label.querySelectorAll('.relationship-label-text > span')].map(line => line.textContent)])),
+            lineHeights: [...host.querySelectorAll('.mind-node, .relationship-label')].map(element => getComputedStyle(element).lineHeight),
+            lineBoxHeights: [...host.querySelectorAll('.node-text > span, .relationship-label-text > span')].map(element => getComputedStyle(element).height),
             editors: host.querySelectorAll('textarea').length
           };
         })()`);
@@ -240,6 +251,8 @@ try {
       assert.equal(printed.editors, 0);
       assert.deepEqual(printed.nodes, expected.nodes);
       assert.deepEqual(printed.relations, expected.relations);
+      assert.ok(printed.lineHeights.every(height => height === expectedLineHeight), 'PDF 中节点与联系文字应使用共同的行高');
+      assert.ok(printed.lineBoxHeights.every(height => height === expectedLineHeight), 'PDF 中每行实际高度应与节点行高一致');
       assert.ok((await fs.readFile(pdf)).subarray(0, 5).equals(Buffer.from('%PDF-')));
     } finally {
       await page.emulateMedia({ media: null });
@@ -258,7 +271,7 @@ try {
   assert.equal(await page.locator('.app-error, .save-error').count(), 0);
   assert.deepEqual(errors, []);
   await fs.writeFile(path.join(home, 'wrapping-results.json'), JSON.stringify(report, null, 2));
-  console.log(JSON.stringify({ success: true, home, checks: ['manual narrow column', 'whole English words', 'CJK and Latin punctuation', 'overlong token fallback', 'manual newlines', 'native editor line agreement', 'both fonts and themes', 'relationship text and editor', 'real white PDF line agreement', 'zoom stability', 'document text unchanged'] }, null, 2));
+  console.log(JSON.stringify({ success: true, home, checks: ['manual narrow column', 'whole English words', 'CJK and Latin punctuation', 'overlong token fallback', 'manual newlines', 'native editor line agreement', 'both fonts and themes', 'shared node and relationship line height in display, editor and PDF', 'relationship text and editor', 'real white PDF line agreement', 'zoom stability', 'document text unchanged'] }, null, 2));
 } catch (error) {
   console.error(`Text wrapping test failed at ${stage}`, error);
   console.error(JSON.stringify({ home, report }));
