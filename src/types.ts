@@ -5,7 +5,7 @@ export interface MindDocument { format: 'inkmap'; version: 1; id: string; title:
 export interface RecentFile { path: string; title: string; updatedAt: string }
 export interface LibraryEntry { kind: 'folder' | 'map'; path: string; name: string; title?: string; children?: LibraryEntry[]; invalid?: boolean }
 export interface LibrarySnapshot { root: string; entries: LibraryEntry[] }
-export interface LibraryMutation { library: LibrarySnapshot; session?: Session; notice?: string }
+export interface LibraryMutation { library?: LibrarySnapshot; session?: Session; notice?: string }
 export interface Session { doc: MindDocument | null; path: string; token: string; recent: RecentFile[]; notice?: string }
 export interface View { x: number; y: number; scale: number }
 export type Theme = 'light' | 'dark';
@@ -17,7 +17,7 @@ export interface DesktopAPI {
   save(doc: MindDocument, token: string): Promise<{ path: string }>;
   newDocument(folderPath?: string): Promise<Session>;
   library(): Promise<LibrarySnapshot>;
-  createFolder(name: string, parentPath?: string): Promise<LibrarySnapshot>;
+  createFolder(name: string, parentPath?: string): Promise<LibraryMutation>;
   moveLibraryItem(sourcePath: string, targetFolderPath: string): Promise<LibraryMutation>;
   renameLibraryItem(sourcePath: string, name: string): Promise<LibraryMutation>;
   deleteLibraryItem(sourcePath: string): Promise<LibraryMutation>;

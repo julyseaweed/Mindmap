@@ -374,7 +374,7 @@ test('library reads real nested folders, sorts naturally, and marks damaged maps
   await Promise.all([store.createFolder('项目10'), store.createFolder('项目2')]);
   const folder = path.join(store.maps, '项目2');
   const nested = await store.createFolder('资料', folder);
-  assert.equal(nested.root, store.maps);
+  assert.equal(nested.library.root, store.maps);
   await store.create(createDocument('观点10'), folder);
   await store.create(createDocument('观点2'), folder);
   await fs.writeFile(path.join(folder, '损坏.mindmap'), '{broken');
@@ -433,6 +433,60 @@ test('a completed active-file move returns its new session even when workspace m
   const edited = addNode(moved.session.doc, 'root').doc;
   await store.save(edited, moved.session.token);
   assert.deepEqual((await new LocalStore(dir).boot()).doc, edited);
+});
+
+for (const operation of ['rename', 'move', 'arrange']) test(`a completed ${operation} returns its writable session when the library cannot refresh`, async t => {
+  const { store, session, dir } = await storeFixture(t);
+  await store.createFolder('目标');
+  const folder = path.join(store.maps, '目标');
+  const readLibrary = store.readLibrary;
+  store.readLibrary = async () => { throw new Error('临时无法读取目录'); };
+  const result = operation === 'rename' ? await store.renameLibraryItem(session.path, '新名称')
+    : operation === 'move' ? await store.moveLibraryItem(session.path, folder)
+    : await store.arrangeLibraryItem(session.path, folder, 'inside');
+  assert.equal(result.library, undefined, 'Do not report a fabricated empty library.');
+  assert.match(result.notice, /列表未能刷新/);
+  assert.ok(result.session?.path);
+  assert.notEqual(result.session.token, session.token);
+  await assert.rejects(fs.access(session.path), { code: 'ENOENT' });
+  const edited = addNode(result.session.doc, result.session.doc.rootId, 'child', '继续编辑').doc;
+  await store.save(edited, result.session.token);
+  store.readLibrary = readLibrary;
+  assert.deepEqual((await new LocalStore(dir).boot()).doc, edited);
+  assert.ok(childrenAt(await store.library(), operation === 'rename' ? store.maps : folder).some(entry => entry.path === result.session.path));
+});
+
+test('creating a folder succeeds without inventing a library snapshot when refresh fails', async t => {
+  const { store, session } = await storeFixture(t);
+  const readLibrary = store.readLibrary;
+  store.readLibrary = async () => { throw new Error('临时无法读取目录'); };
+  const result = await store.createFolder('已创建');
+  assert.equal(result.library, undefined);
+  assert.match(result.notice, /文件夹已创建.*列表未能刷新/);
+  assert.ok((await fs.stat(path.join(store.maps, '已创建'))).isDirectory());
+  assert.deepEqual(store.snapshot(), session);
+  store.readLibrary = readLibrary;
+  assert.equal((await store.library()).entries.filter(entry => entry.name === '已创建').length, 1);
+});
+
+test('a committed same-folder arrangement succeeds even if its final refresh fails', async t => {
+  const { store, dir } = await storeFixture(t);
+  const first = await store.create(createDocument('A'));
+  const second = await store.create(createDocument('B'));
+  const readLibrary = store.readLibrary.bind(store);
+  let reads = 0;
+  store.readLibrary = (...args) => {
+    if (++reads === 2) throw new Error('临时无法读取目录');
+    return readLibrary(...args);
+  };
+  const result = await store.arrangeLibraryItem(second.path, first.path, 'before');
+  assert.equal(result.library, undefined);
+  assert.match(result.notice, /操作已完成.*列表未能刷新/);
+  assert.equal(store.snapshot().token, second.token);
+  const restarted = new LocalStore(dir);
+  await restarted.boot();
+  const names = (await restarted.library()).entries.map(entry => entry.title);
+  assert.equal(names.indexOf('B') + 1, names.indexOf('A'));
 });
 
 test('moving and renaming folders updates descendant active, recent, and recovery paths', async t => {
@@ -544,6 +598,33 @@ test('deleting another map recycles its bytes and preserves the active session',
   assert.ok(!result.library.entries.some(entry => entry.path === session.path));
   assert.ok(!store.snapshot().recent.some(item => item.path === session.path));
   assert.equal((await new LocalStore(dir).boot()).path, active.path);
+});
+
+for (const active of [true, false]) test(`deleting an ${active ? 'active' : 'inactive'} map preserves the committed session when refresh fails`, async t => {
+  const { store, session, dir } = await storeFixture(t);
+  const other = await store.create(createDocument('保留的导图'));
+  const target = active ? other : session;
+  const { trash, items } = await simulatedTrash(dir);
+  const readLibrary = store.readLibrary;
+  store.readLibrary = async () => { throw new Error('临时无法读取目录'); };
+  const result = await store.deleteLibraryItem(target.path, trash);
+  assert.equal(result.library, undefined);
+  assert.match(result.notice, /已移入回收站.*列表未能刷新/);
+  assert.equal(items.length, 1);
+  await assert.rejects(fs.access(target.path), { code: 'ENOENT' });
+  if (active) {
+    assert.equal(result.session.doc, null);
+    assert.equal(result.session.path, '');
+    assert.equal(result.session.token, '');
+  } else {
+    assert.equal(result.session, undefined);
+    assert.deepEqual(store.snapshot(), { ...other, recent: store.snapshot().recent });
+    await store.save(addNode(other.doc, other.doc.rootId).doc, other.token);
+  }
+  store.readLibrary = readLibrary;
+  const restarted = await new LocalStore(dir).boot();
+  assert.equal(restarted.path, active ? '' : other.path);
+  assert.equal((await store.library()).entries.some(entry => entry.path === target.path), false);
 });
 
 test('deleting the active map waits for saves and stays empty despite other maps with the same title', async t => {

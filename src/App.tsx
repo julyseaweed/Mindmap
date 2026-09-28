@@ -726,6 +726,7 @@ export default function App() {
 
   const fileAction = async (action: 'new' | 'open' | 'save-as', path?: string) => {
     if (!api || !sessionRef.current || busyRef.current || (action === 'save-as' && !docRef.current)) return;
+    commitName();
     finishEdit();
     if (action === 'save-as' && saveTimer.current) clearTimeout(saveTimer.current);
     busyRef.current = true;
@@ -755,7 +756,7 @@ export default function App() {
     }
   };
 
-  const changeLibrary = async (action: () => Promise<LibraryMutation>, options: { relocation?: { source: string; destination: string }; reloadSession?: boolean } = {}) => {
+  const changeLibrary = async (action: () => Promise<LibraryMutation>, options: { relocation?: { source: string; destination: string }; deletedPath?: string; reloadSession?: boolean } = {}) => {
     if (!api || busyRef.current) throw new Error('请稍候再试。');
     finishEdit();
     busyRef.current = true; setBusy(true);
@@ -779,8 +780,14 @@ export default function App() {
         const relocated = selectedKey === sourceKey || selectedKey.startsWith(sourceKey + '/');
         if (relocated) candidate = relocation.destination + previousSelection.slice(relocation.source.length);
       }
-      selectLibraryPath(findLibraryEntry(result.library.entries, candidate)?.path ?? '');
-      acceptLibrary(result.library);
+      if (options.deletedPath) {
+        const deletedKey = libraryPathKey(options.deletedPath), candidateKey = libraryPathKey(candidate);
+        if (candidateKey === deletedKey || candidateKey.startsWith(deletedKey + '/')) candidate = '';
+      }
+      // A completed file operation must still update the session and selection
+      // when reading the refreshed library fails afterward.
+      selectLibraryPath(result.library ? findLibraryEntry(result.library.entries, candidate)?.path ?? '' : candidate);
+      if (result.library) acceptLibrary(result.library);
       if (result.notice) showError(result.notice);
       return result.library;
     } catch (error) {
@@ -791,7 +798,8 @@ export default function App() {
   };
 
   const createLibraryFolder = async (name: string, parentPath: string) => {
-    const snapshot = await changeLibrary(async () => ({ library: await api!.createFolder(name, parentPath) }));
+    const snapshot = await changeLibrary(() => api!.createFolder(name, parentPath));
+    if (!snapshot) { selectLibraryPath(parentPath.replace(/[\\/]+$/, '') + '/' + name.trim()); return; }
     const entries = parentPath === snapshot.root ? snapshot.entries : findLibraryEntry(snapshot.entries, parentPath)?.children ?? [];
     const folder = entries.find(entry => entry.kind === 'folder' && entry.name === name.trim());
     if (folder) selectLibraryPath(folder.path);
@@ -822,6 +830,7 @@ export default function App() {
 
   const exportText = async (destination: 'clipboard' | 'markdown') => {
     if (!api || !docRef.current || busyRef.current || fontBusy || mediaGesture.current || drag.current?.active) return;
+    commitName();
     finishEdit(); setMenu(false); setContext(null);
     busyRef.current = true; setBusy(true);
     try {
@@ -841,7 +850,7 @@ export default function App() {
     busyRef.current = true;
     let prepared: ReturnType<typeof preparePdfExport> | undefined;
     try {
-      flushSync(() => { finishEdit(); setMenu(false); setContext(null); setBusy(true); });
+      flushSync(() => { commitName(); finishEdit(); setMenu(false); setContext(null); setBusy(true); });
       await pasteQueue.current;
       flushSync(() => { setDoc(docRef.current); });
       await document.fonts.ready;
@@ -994,7 +1003,8 @@ export default function App() {
       const modifier = event.ctrlKey || event.metaKey;
       const key = event.key.toLowerCase();
       const input = (event.target as HTMLElement).closest('input, textarea, select, [contenteditable="true"]');
-      if (modifier && key === 's') { event.preventDefault(); if (event.shiftKey) void fileAction('save-as'); else { finishEdit(); void pasteQueue.current.then(() => flush()).catch(() => {}); } return; }
+      if (help) { if (key === 'escape') setHelp(false); return; }
+      if (modifier && key === 's') { event.preventDefault(); if (event.shiftKey) void fileAction('save-as'); else { commitName(); finishEdit(); void pasteQueue.current.then(() => flush()).catch(() => {}); } return; }
       if (modifier && key === 'o') { event.preventDefault(); void fileAction('open'); return; }
       if (modifier && key === 'n') { event.preventDefault(); void fileAction('new'); return; }
       if (modifier && event.shiftKey && key === 'c') { event.preventDefault(); void copy(); return; }
@@ -1011,7 +1021,6 @@ export default function App() {
       }
       if (selectedImage && (key === 'delete' || key === 'backspace')) { event.preventDefault(); removeImage(selectedImage.nodeId, selectedImage.imageId); return; }
       if (selectedImage && key === 'escape') { setSelectedImage(null); return; }
-      if (help) { if (key === 'escape') setHelp(false); return; }
       if (key === 'escape') {
         setMenu(false); setContext(null); setSearchOpen(false);
         setRelationshipSource(null); setRelationshipPointer(null);
@@ -1173,7 +1182,7 @@ export default function App() {
         onOpen={path => { void fileAction('open', path); }} onNew={() => void fileAction('new', selectedFolder || undefined)}
         onRefresh={() => void refreshLibrary()} onClose={() => setLibraryOpen(false)} onCreateFolder={createLibraryFolder}
         onRename={renameLibraryItem} onMove={moveLibraryItem} onArrange={arrangeLibraryItem}
-        onDelete={async path => { await changeLibrary(() => api!.deleteLibraryItem(path), { reloadSession: true }); }}/>
+        onDelete={async path => { await changeLibrary(() => api!.deleteLibraryItem(path), { deletedPath: path, reloadSession: true }); }}/>
       </ResizableSidebar>}
       {outline && <ResizableSidebar name="大纲" preferredWidth={outlineWidth} onWidthChange={setOutlineWidth} onResizeStart={finishEdit}>
         <aside className="outline-panel">
@@ -1342,8 +1351,13 @@ export default function App() {
     </div>}
 
     {help && <div className="modal-backdrop" onPointerDown={e => { if (e.target === e.currentTarget) setHelp(false); }}><section className="help-modal" role="dialog" aria-modal="true" aria-label="快捷键" onKeyDown={e => {
-      if (e.key === 'Escape') setHelp(false);
-      if (e.key === 'Tab') { e.preventDefault(); (e.currentTarget.querySelector('button') as HTMLButtonElement)?.focus(); }
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setHelp(false); }
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        const buttons = Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));
+        const index = buttons.findIndex(button => button === document.activeElement);
+        buttons[(index + (e.shiftKey ? -1 : 1) + buttons.length) % buttons.length]?.focus();
+      }
     }}><div className="help-heading"><div><span className="eyebrow">KEEP YOUR THOUGHTS FLOWING</span><h2>让思路，跟得上手指。</h2></div><IconButton icon={X} label="关闭快捷键" onClick={() => setHelp(false)}/></div>
       <p className="help-intro">选中节点后直接操作。编辑中按 Enter 继续写同级，Ctrl + Enter 完成。</p>
       <div className="shortcut-grid">{shortcuts.map(([key, description]) => <div key={key}><span>{description}</span><kbd>{key}</kbd></div>)}</div>

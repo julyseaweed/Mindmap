@@ -208,12 +208,52 @@ test('native library files with a UTF-8 BOM open and save without a false disk c
   native.nodes.root.text = '正确读取中文';
   const source = path.join(store.maps, '带 BOM.mindmap');
   await fs.writeFile(source, '\uFEFF' + JSON.stringify(native));
+  const listed = (await store.library()).entries.find(entry => entry.path === source);
+  assert.equal(listed.title, native.title);
+  assert.equal(listed.invalid, undefined);
   const opened = await store.open(source);
   assert.equal(opened.path, source);
   assert.deepEqual(opened.doc, native);
   const edited = addNode(opened.doc, opened.doc.rootId, 'child', '正常保存').doc;
   await store.save(edited, opened.token);
   assert.deepEqual(JSON.parse(await fs.readFile(source, 'utf8')), edited);
+});
+
+test('BOM maps keep their identity and title when arranged, renamed, saved and reopened', async t => {
+  const { home, store, session } = await fixture(t);
+  const native = createDocument('BOM 原标题');
+  native.nodes.root.text = '保留节点原文';
+  const source = path.join(store.maps, 'BOM.mindmap');
+  const original = '\uFEFF' + JSON.stringify(native);
+  await fs.writeFile(source, original);
+  await store.arrangeLibraryItem(source, session.path, 'before');
+  const opened = await store.open(source);
+  const renamed = await store.renameLibraryItem(source, 'BOM 新标题');
+  assert.equal(renamed.session.doc.title, 'BOM 新标题');
+  assert.equal(renamed.session.doc.nodes.root.text, native.nodes.root.text);
+  assert.equal(renamed.library.entries[0].path, renamed.session.path);
+  assert.equal(renamed.library.entries[0].invalid, undefined);
+  assert.notEqual(renamed.session.token, opened.token);
+  assert.equal(await fs.readFile(path.join(home, '.mindmap', 'backups', `${native.id}.mindmap`), 'utf8'), original);
+  const edited = addNode(renamed.session.doc, native.rootId, 'child', '继续编辑').doc;
+  await store.save(edited, renamed.session.token);
+  const restarted = new LocalStore(home);
+  assert.deepEqual((await restarted.boot()).doc, edited);
+  assert.equal((await restarted.library()).entries[0].path, renamed.session.path);
+});
+
+test('a completed recovery journal matches a native BOM map without making a duplicate', async t => {
+  const { home, store } = await fixture(t);
+  const native = createDocument('恢复已保存的 BOM 导图');
+  const source = path.join(store.maps, 'BOM.mindmap');
+  await fs.writeFile(source, '\uFEFF' + JSON.stringify(native));
+  await fs.writeFile(store.recoveryPath, JSON.stringify({ path: source, doc: native }));
+  const restarted = new LocalStore(home);
+  const restored = await restarted.boot();
+  assert.equal(restored.path, source);
+  assert.deepEqual(restored.doc, native);
+  assert.equal(restored.notice, undefined);
+  assert.equal((await restarted.library()).entries.filter(entry => entry.title?.includes('（恢复）')).length, 0);
 });
 
 test('malformed UTF-8 import is rejected without changing its bytes or active state', async t => {

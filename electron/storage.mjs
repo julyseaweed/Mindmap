@@ -27,6 +27,7 @@ const sameKey = (a, b) => comparableKey(a) === comparableKey(b);
 const insideKey = (root, key) => sameKey(root, key) || comparableKey(key).startsWith(comparableKey(root) + '/');
 const displayName = entry => entry.kind === 'folder' ? entry.name : entry.title || entry.name.replace(/\.mindmap$/i, '');
 const MAX_DOCUMENT_BYTES = 128 * 1024 * 1024;
+const parseNativeDocument = content => validateDocument(JSON.parse(content.replace(/^\uFEFF/, '')));
 const recoveryHash = content => createHash('sha256').update(content).digest('hex');
 const fileIdentity = stat => `${stat.dev}:${stat.ino}:${stat.birthtimeMs}`;
 const entryName = value => {
@@ -93,7 +94,7 @@ export class LocalStore {
       const recovery = JSON.parse(recoveryContent);
       const doc = validateDocument(recovery.doc);
       let saved = null;
-      try { saved = validateDocument(JSON.parse(await fs.readFile(recovery.path, 'utf8'))); }
+      try { saved = parseNativeDocument(await fs.readFile(recovery.path, 'utf8')); }
       catch { /* A missing or damaged original must not discard valid pending edits. */ }
       if (JSON.stringify(doc) !== JSON.stringify(saved)) {
         doc.id = 'n' + randomUUID().replaceAll('-', '');
@@ -288,7 +289,7 @@ export class LocalStore {
   async entryIdentity(item) {
     const stat = await fs.stat(item.path);
     if (item.kind === 'map' && stat.size <= MAX_DOCUMENT_BYTES) {
-      try { return 'map:' + validateDocument(JSON.parse(await fs.readFile(item.path, 'utf8'))).id; } catch {}
+      try { return 'map:' + parseNativeDocument(await fs.readFile(item.path, 'utf8')).id; } catch {}
     }
     return `${item.kind}:${stat.dev}:${stat.ino}:${stat.birthtimeMs}`;
   }
@@ -314,7 +315,7 @@ export class LocalStore {
           const map = { ...item, name: entry.name };
           try {
             if (stat.size > MAX_DOCUMENT_BYTES) throw new Error('文件过大');
-            const doc = validateDocument(JSON.parse(await fs.readFile(item.path, 'utf8')));
+            const doc = parseNativeDocument(await fs.readFile(item.path, 'utf8'));
             map.title = doc.title;
             identities.set(item.path, 'map:' + doc.id);
           } catch { map.invalid = true; }
@@ -336,12 +337,20 @@ export class LocalStore {
     return this.readLibrary();
   }
 
+  async completeLibraryMutation(result = {}, refreshNotice = '操作已完成，但列表未能刷新，请刷新导图库重试。') {
+    try { return { ...result, library: await this.readLibrary() }; }
+    catch {
+      // A refresh failure must not hide an already committed file operation or its new session token.
+      return { ...result, notice: [result.notice, refreshNotice].filter(Boolean).join('\n') };
+    }
+  }
+
   createFolder(name, parentPath = this.maps) {
     return this.enqueue(async () => {
       const parent = await this.libraryPath(parentPath, 'folder');
       const folder = path.join(parent.path, entryName(name));
       try { await fs.mkdir(folder); } catch (error) { if (error.code === 'EEXIST') throw new Error('这里已有同名文件或文件夹。'); throw error; }
-      return this.readLibrary();
+      return this.completeLibraryMutation({}, '文件夹已创建，但列表未能刷新，请刷新导图库重试。');
     });
   }
 
@@ -408,7 +417,7 @@ export class LocalStore {
     if (bytes.length > (isNative ? MAX_DOCUMENT_BYTES : MAX_IMPORT_BYTES)) throw new Error('文件过大，暂时无法打开。');
     try { raw = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes); }
     catch { throw new Error('无法读取文件文字，请将文件保存为 UTF-8 编码后重试。'); }
-    const doc = isNative ? validateDocument(JSON.parse(raw.replace(/^\uFEFF/, ''))) : validateDocument(importTextDocument(raw, extension, path.basename(file, path.extname(file))));
+    const doc = isNative ? parseNativeDocument(raw) : validateDocument(importTextDocument(raw, extension, path.basename(file, path.extname(file))));
     if (!isNative || !this.containsLibraryPath(file)) {
       doc.id = 'n' + randomUUID().replaceAll('-', '');
       const imported = await this.writeNewLibraryFile(doc, { atomic: true });
@@ -509,7 +518,6 @@ export class LocalStore {
       if (source.kind === 'folder' && within(source.path, folder.path)) throw new Error('不能把文件夹移入自身或它的子文件夹。');
       const destination = path.join(folder.path, path.basename(source.path));
       const moved = !samePath(source.path, destination) ? await this.relocate(source, destination) : null;
-      let orderSaved = false;
       try {
         const identities = new Map();
         const library = await this.readLibrary(identities);
@@ -537,13 +545,12 @@ export class LocalStore {
         for (const existing of Object.keys(next)) if (sameKey(existing, key) && existing !== key) delete next[existing];
         next[key] = ordered.map(entry => ({ name: entry.name, identity: identities.get(entry.path) }));
         await this.saveOrder(next);
-        orderSaved = true;
-        return { library: await this.readLibrary(), ...(moved?.session ? { session: moved.session } : {}), ...(moved?.notice ? { notice: moved.notice } : {}) };
+        return this.completeLibraryMutation({ ...(moved?.session ? { session: moved.session } : {}), ...(moved?.notice ? { notice: moved.notice } : {}) });
       } catch (error) {
         if (!moved) throw error;
         let library = moved.library;
         try { library = await this.readLibrary(); } catch {}
-        return { library, ...(moved.session ? { session: moved.session } : {}), notice: orderSaved ? '文件已移动，但列表未能刷新，请刷新导图库重试。' : '文件已移动，但排序未能保存，请重试。' };
+        return { ...(library ? { library } : {}), ...(moved.session ? { session: moved.session } : {}), notice: [moved.notice, '文件已移动，但排序未能保存，请重试。'].filter(Boolean).join('\n') };
       }
     });
   }
@@ -607,8 +614,7 @@ export class LocalStore {
           await fs.rm(this.deletionPath, { force: true });
         }
       } catch { notice = positionNotice; }
-      const library = await this.readLibrary();
-      return { library, ...(activeRemoved ? { session: this.snapshot() } : {}), ...(notice ? { notice } : {}) };
+      return this.completeLibraryMutation({ ...(activeRemoved ? { session: this.snapshot() } : {}), ...(notice ? { notice } : {}) }, '已移入回收站，但列表未能刷新，请刷新导图库重试。');
     });
   }
 
@@ -626,7 +632,7 @@ export class LocalStore {
       if (stat.size <= MAX_DOCUMENT_BYTES) {
         const raw = await fs.readFile(source.path, 'utf8');
         if (this.current && samePath(this.current.path, source.path) && raw !== this.current.diskContent) throw new Error('文件在其他地方被修改了。请重新打开后再重命名。');
-        try { renamedDoc = validateDocument(JSON.parse(raw)); } catch { /* Invalid files retain their original bytes when renamed. */ }
+        try { renamedDoc = parseNativeDocument(raw); } catch { /* Invalid files retain their original bytes when renamed. */ }
         if (renamedDoc) {
           renamedDoc.title = title;
           renamedContent = JSON.stringify(renamedDoc, null, 2);
@@ -673,6 +679,6 @@ export class LocalStore {
     }
     const orderNotice = await this.maintainOrder(this.remapOrder(source, destination, identity), '操作已完成，但排序未能保存，请重试。');
     notice ??= orderNotice;
-    return { library: await this.readLibrary(), ...(activeMoved ? { session: this.snapshot() } : {}), ...(notice ? { notice } : {}) };
+    return this.completeLibraryMutation({ ...(activeMoved ? { session: this.snapshot() } : {}), ...(notice ? { notice } : {}) });
   }
 }

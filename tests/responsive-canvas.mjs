@@ -78,6 +78,19 @@ const setSidebar = async mode => {
     await eventually(async () => Number(await separator.getAttribute('aria-valuenow')) === expected, '侧栏宽度没有更新');
   }
 };
+const checkTitleTypography = async description => {
+  const typography = element => {
+    const style = getComputedStyle(element);
+    return Object.fromEntries(['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'letterSpacing', 'lineHeight'].map(property => [property, style[property]]));
+  };
+  const title = page.locator('.document-title');
+  const before = await title.evaluate(typography);
+  await title.click();
+  const editor = page.getByRole('textbox', { name: '导图名称', exact: true });
+  assert.deepEqual(await editor.evaluate(typography), before, `${description} 导图标题进入编辑后应保持相同字体、字号和字间距`);
+  await editor.press('Escape');
+  await title.waitFor();
+};
 const checkToolbars = async description => {
   const result = await page.locator('.canvas').evaluate(canvas => {
     const bounds = canvas.getBoundingClientRect();
@@ -146,6 +159,7 @@ try {
     await setAppearance(font, theme);
     for (const windowWidth of [560, 720, 960]) {
       await setWindow(windowWidth);
+      await checkTitleTypography(`${windowWidth}px ${font} ${theme}`);
       for (const sidebar of ['none', 'library', 'library-max', 'outline', 'outline-max']) {
         stage = `${windowWidth}px ${sidebar} ${font} ${theme}`;
         await setSidebar(sidebar);
@@ -162,6 +176,7 @@ try {
   stage = 'real actions in the narrowest canvas';
   await setAppearance('nevermind', 'dark');
   await setWindow(560);
+  if (smoke) await checkTitleTypography('narrowest window NeverMind dark');
   await setSidebar('library-max');
   await fit();
   if (smoke) {
@@ -196,7 +211,7 @@ try {
   assert.equal(await page.locator('.app-error, .save-error').count(), 0);
   assert.deepEqual(errors, []);
   const screenshot = await capture();
-  console.log(JSON.stringify({ success: true, home, smoke, screenshot, scenarios: checked.length, checks: [...(smoke ? ['560px window at 420px height, NeverMind/dark, maximum library width'] : ['560/720/960px windows at 420px height', 'no sidebar and both sidebars at default/maximum widths', 'both fonts and themes']), 'node and relationship toolbars centered within canvas', 'all controls visible and hit-testable', 'separate centered zoom row', 'real zoom, child creation, undo and more menu', 'document preserved and no application errors'] }, null, 2));
+  console.log(JSON.stringify({ success: true, home, smoke, screenshot, scenarios: checked.length, checks: [...(smoke ? ['560px window at 420px height, NeverMind/dark, maximum library width'] : ['560/720/960px windows at 420px height', 'no sidebar and both sidebars at default/maximum widths', 'both fonts and themes']), 'title typography remains consistent while renaming', 'node and relationship toolbars centered within canvas', 'all controls visible and hit-testable', 'separate centered zoom row', 'real zoom, child creation, undo and more menu', 'document preserved and no application errors'] }, null, 2));
 } catch (error) {
   console.error(`Responsive canvas test failed at: ${stage}`, error);
   console.error(JSON.stringify({ home, lastScenarios: checked.slice(-4) }));

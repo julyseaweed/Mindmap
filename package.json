@@ -32,6 +32,8 @@
     "test:empty-delete": "node tests/empty-node-delete.mjs",
     "test:single-delete": "node tests/single-node-delete.mjs",
     "test:interactions": "node tests/interaction-boundaries.mjs",
+    "test:editor-boundaries": "node tests/editor-boundaries.mjs",
+    "test:library-refresh-failure": "node tests/library-refresh-failure.mjs",
     "test:save-copy": "node tests/save-copy.mjs",
     "package": "npm run build && node scripts/package.mjs",
     "test:import": "node tests/import-desktop.mjs",

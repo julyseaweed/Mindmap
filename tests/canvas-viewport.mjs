@@ -135,8 +135,8 @@ const capture = async name => {
 try {
   const executablePath = process.env.INKMAP_TEST_EXECUTABLE;
   app = await electron.launch({ ...(executablePath ? { executablePath, args: [] } : { args: [root] }), env, timeout: 30000 });
-  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setBackgroundThrottling(false));
   page = await app.firstWindow();
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.setBackgroundThrottling(false));
   page.setDefaultTimeout(10000);
   page.on('pageerror', error => errors.push(error.message));
   await page.locator('.mind-node[data-node-id="r11d13"]').waitFor();
