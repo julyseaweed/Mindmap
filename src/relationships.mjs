@@ -46,6 +46,21 @@ function endpoint(box, vector, fallback) {
   return add(point, { x: direction.x * factor, y: direction.y * factor });
 }
 
+function directControls(sourceBox, targetBox) {
+  const source = center(sourceBox), target = center(targetBox);
+  const direction = { x: target.x - source.x, y: target.y - source.y };
+  if (Math.hypot(direction.x, direction.y) < .001) return null;
+  const reverse = { x: -direction.x, y: -direction.y };
+  const start = endpoint(sourceBox, direction, direction), end = endpoint(targetBox, reverse, reverse);
+  const gap = { x: end.x - start.x, y: end.y - start.y };
+  // Overlapping boxes have no open corridor along their center line.
+  if (gap.x * direction.x + gap.y * direction.y <= 0) return null;
+  return {
+    control1: { x: start.x + gap.x / 3 - source.x, y: start.y + gap.y / 3 - source.y },
+    control2: { x: end.x - gap.x / 3 - target.x, y: end.y - gap.y / 3 - target.y },
+  };
+}
+
 function curveAt(a, b, c, d, t) {
   const inverse = 1 - t;
   return inverse ** 3 * a + 3 * inverse ** 2 * t * b + 3 * inverse * t ** 2 * c + t ** 3 * d;
@@ -156,6 +171,20 @@ function segmentsMeet(a, b, c, d) {
   return Math.min(pointDistance(a, c, d), pointDistance(b, c, d), pointDistance(c, a, b), pointDistance(d, a, b)) < 5;
 }
 
+function sharedLength(a, b, c, d) {
+  const length = distance(a, b), otherLength = distance(c, d);
+  if (length < .001 || otherLength < .001) return 0;
+  const ux = (b.x - a.x) / length, uy = (b.y - a.y) / length;
+  // A brief crossing is different from tracing along an existing connector.
+  if (Math.abs(ux * (d.x - c.x) + uy * (d.y - c.y)) / otherLength < .985) return 0;
+  const first = (c.x - a.x) * ux + (c.y - a.y) * uy;
+  const last = (d.x - a.x) * ux + (d.y - a.y) * uy;
+  const low = Math.max(0, Math.min(first, last)), high = Math.min(length, Math.max(first, last));
+  if (high <= low) return 0;
+  const middle = { x: a.x + ux * (low + high) / 2, y: a.y + uy * (low + high) / 2 };
+  return pointDistance(middle, c, d) < 3 ? high - low : 0;
+}
+
 function sampleCurve(geometry) {
   const { start, c1, c2, end } = geometry;
   const points = [start];
@@ -200,7 +229,7 @@ function routingScene(boxes, nodes, rootId) {
       const obstacleId = rootBranch ? `tree:${parentId}>${childId}` : `tree:${parentId}`;
       return connector.curves.flatMap(curve => edgeSegments(curve, obstacleId));
     });
-    scene = { boxes, obstacles: spatialIndex(obstacles), tree, routes: new Map(), batches: new Map() };
+    scene = { boxes, obstacles: spatialIndex(obstacles), tree, routes: new Map(), preferredRoutes: new Map(), batches: new Map() };
     recentScenes.set(key, scene);
     if (recentScenes.size > 8) recentScenes.delete(recentScenes.keys().next().value);
   }
@@ -210,9 +239,15 @@ function routingScene(boxes, nodes, rootId) {
 
 function scoreRoute(geometry, relationship, scene, edges, labels, ceiling) {
   const points = sampleCurve(geometry);
+  const endpointHits = [relationship.sourceId, relationship.targetId].filter(id => {
+    const bounds = expand(scene.boxes[id], -.5);
+    return points.slice(1).some((point, i) => segmentHitsBox(points[i], point, bounds));
+  }).length;
   let hits = 0;
-  const rejected = () => ({ hits, crossings: Infinity, length: Infinity, cost: Infinity });
-  const tooManyHits = () => ceiling && hits > ceiling.hits;
+  const rejected = () => ({ endpointHits, hits, retraces: Infinity, crossings: Infinity, length: Infinity, cost: Infinity });
+  // Do not trade folding back through either endpoint for fewer obstacles elsewhere.
+  if (ceiling && endpointHits > ceiling.endpointHits) return rejected();
+  const tooManyHits = () => ceiling && endpointHits === ceiling.endpointHits && hits > ceiling.hits;
   const hitBoxes = new Set();
   for (let i = 1; i < points.length; i++) {
     const a = points[i - 1], b = points[i];
@@ -233,32 +268,57 @@ function scoreRoute(geometry, relationship, scene, edges, labels, ceiling) {
       if (tooManyHits()) return rejected();
     }
   }
-  const label = expand(geometry.label, 8);
-  for (const obstacle of scene.obstacles.query(label)) if (intersects(label, obstacle.box)) hits++;
-  for (const prior of labels.query(label)) if (intersects(label, prior.bounds)) hits++;
+  // An empty relationship has no visible caption. Its editing placeholder must
+  // not obstruct an otherwise clear route between adjacent nodes.
+  const label = relationship.text ? expand(geometry.label, 2) : null;
+  if (label) {
+    for (const obstacle of scene.obstacles.query(label)) if (intersects(label, obstacle.box)) hits++;
+    for (const prior of labels.query(label)) if (intersects(label, prior.bounds)) hits++;
+  }
   if (tooManyHits()) return rejected();
   const crossed = new Set();
+  const retraced = new Set(), sharedLengths = new Map();
   const length = points.slice(1).reduce((sum, point, i) => sum + distance(points[i], point), 0);
   const handleLength = distance(geometry.start, geometry.c1) + distance(geometry.end, geometry.c2);
   const baseCost = length + handleLength * .08;
-  if (ceiling && hits === ceiling.hits && baseCost > ceiling.cost) return { hits, crossings: 0, length, cost: baseCost };
+  // A caption must not cover an unrelated line, and sustained line overlap is
+  // more disruptive than a single crossing. Keep those priorities separate.
+  if (label) for (const edge of edges.query(label)) if (segmentHitsBox(edge.a, edge.b, label)) { crossed.add(edge.id); retraced.add(edge.id); }
+  const score = () => ({ endpointHits, hits, retraces: retraced.size, crossings: crossed.size, length, cost: baseCost + crossed.size * 100 });
+  const worseThanCeiling = () => ceiling && endpointHits === ceiling.endpointHits && hits === ceiling.hits && (retraced.size > ceiling.retraces || (retraced.size === ceiling.retraces && baseCost + crossed.size * 100 > ceiling.cost));
+  if (worseThanCeiling()) return score();
   for (let i = 1; i < points.length; i++) {
     const a = points[i - 1], b = points[i];
+    const shared = new Map();
     for (const edge of edges.query(expand(segmentBounds(a, b), 5))) {
-      if (crossed.has(edge.id)) continue;
       // Separate ports on a node are preferable to retracing its tree connector.
       if (segmentsMeet(a, b, edge.a, edge.b)) crossed.add(edge.id);
+      shared.set(edge.id, Math.max(shared.get(edge.id) ?? 0, sharedLength(a, b, edge.a, edge.b)));
     }
-    if (ceiling && hits === ceiling.hits && baseCost + crossed.size * 100 > ceiling.cost) return { hits, crossings: crossed.size, length, cost: baseCost + crossed.size * 100 };
+    for (const [id, amount] of shared) {
+      const total = (sharedLengths.get(id) ?? 0) + amount;
+      sharedLengths.set(id, total);
+      if (total > 8) retraced.add(id);
+    }
+    if (worseThanCeiling()) return score();
   }
-  for (const edge of edges.query(label)) if (segmentHitsBox(edge.a, edge.b, label)) crossed.add(edge.id);
-  return { hits, crossings: crossed.size, length, cost: baseCost + crossed.size * 100 };
+  return score();
 }
 
 function* controlCandidates(sourceBox, targetBox, label, obstacles) {
   const source = center(sourceBox), target = center(targetBox);
   const dx = target.x - source.x, dy = target.y - source.y;
   const base = Math.max(90, Math.min(240, Math.hypot(dx, dy) * .3));
+  const direct = directControls(sourceBox, targetBox);
+  if (direct) {
+    const length = Math.hypot(dx, dy);
+    // Try a small departure from the direct corridor before routing around a
+    // whole column. Both sides are considered, independently of link direction.
+    for (const bend of [16, -16, 32, -32, 64, -64]) {
+      const offset = { x: -dy / length * bend, y: dx / length * bend };
+      yield { control1: add(direct.control1, offset), control2: add(direct.control2, offset) };
+    }
+  }
   for (const sign of [1, -1]) for (const shift of [24, -24, 48, -48, 80, -80]) {
     const bow = Math.max(base, (label.width / 2 + 28) / .75);
     yield { control1: { x: sign * (sourceBox.width / 2 + bow), y: shift }, control2: { x: sign * (targetBox.width / 2 + bow), y: shift } };
@@ -297,44 +357,62 @@ function routeControls(relationship, scene, label, edges, labels, prefix) {
   const source = scene.boxes[relationship.sourceId], target = scene.boxes[relationship.targetId];
   const defaults = defaultControls(source, target, label);
   if (relationship.control1 && relationship.control2) return defaults;
-  const key = JSON.stringify([relationship.sourceId, relationship.targetId, label.width, label.height, relationship.control1, relationship.control2, prefix]);
+  const key = JSON.stringify([relationship.sourceId, relationship.targetId, !!relationship.text, label.width, label.height, relationship.control1, relationship.control2, prefix]);
   const cached = scene.routes.get(key);
   if (cached) return cached;
+  const preferredKey = JSON.stringify([relationship.id, relationship.sourceId, relationship.targetId, relationship.control1, relationship.control2]);
   let best, bestScore;
-  const consider = controls => {
+  const better = score => {
+    if (!bestScore) return true;
+    for (const key of ['endpointHits', 'hits', 'retraces', 'cost']) {
+      if (score[key] !== bestScore[key]) return score[key] < bestScore[key];
+    }
+    return false;
+  };
+  const consider = (controls, complete = false) => {
     const bounded = point => ({ x: Math.max(-100000, Math.min(100000, point.x)), y: Math.max(-100000, Math.min(100000, point.y)) });
     controls = { control1: bounded(controls.control1), control2: bounded(controls.control2) };
     const geometry = buildGeometry(relationship, scene.boxes, label, controls);
-    const score = scoreRoute(geometry, relationship, scene, edges, labels, bestScore);
-    if (!bestScore || score.hits < bestScore.hits || (score.hits === bestScore.hits && score.cost < bestScore.cost)) {
+    const score = scoreRoute(geometry, relationship, scene, edges, labels, complete ? undefined : bestScore);
+    if (better(score)) {
       best = controls; bestScore = score;
     }
+    return score;
   };
-  consider(defaults);
-  if (bestScore.hits || bestScore.crossings) {
-    for (const candidate of controlCandidates(source, target, label, scene.obstacles)) consider(candidate);
-    // Different departure/arrival sides can fit through crowded column gaps.
-    if (bestScore.hits || bestScore.crossings) {
-      const directions = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]];
-      const separation = Math.hypot(center(target).x - center(source).x, center(target).y - center(source).y);
-      for (const factor of [.65, 1.3, 2.5]) for (const first of directions) for (const last of directions) {
-        const vector = (box, direction) => {
-          const length = Math.max(100, separation * factor);
-          return outside(box, { x: direction[0] * length, y: direction[1] * length });
-        };
-        consider({ control1: vector(source, first), control2: vector(target, last) });
+  const direct = directControls(source, target);
+  if (direct) consider(direct);
+  // A clear straight connection is the natural default. Existing tree edges,
+  // nodes and actual captions can still require a separate curved route.
+  if (!bestScore || bestScore.hits || bestScore.retraces || bestScore.crossings) {
+    // Typing changes caption bounds, not the whole graph. Revalidate a previous
+    // route before searching again; an unobstructed direct route still wins first.
+    const preferred = scene.preferredRoutes.get(preferredKey);
+    const previousScore = preferred && consider(preferred.controls, true);
+    const unchangedLabel = preferred?.width === label.width && preferred?.height === label.height;
+    const noNewCollisions = previousScore && ['endpointHits', 'hits', 'retraces', 'crossings'].every(key => previousScore[key] <= preferred.score[key]);
+    const reusable = previousScore && noNewCollisions && (unchangedLabel || (!previousScore.hits && !previousScore.retraces));
+    if (!reusable) {
+      consider(defaults);
+      for (const candidate of controlCandidates(source, target, label, scene.obstacles)) consider(candidate);
+      // Different departure/arrival sides can fit through crowded column gaps.
+      if (bestScore.hits || bestScore.retraces || bestScore.crossings) {
+        const directions = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]];
+        const separation = Math.hypot(center(target).x - center(source).x, center(target).y - center(source).y);
+        for (const factor of [.65, 1.3, 2.5]) for (const first of directions) for (const last of directions) {
+          const vector = (box, direction) => {
+            const length = Math.max(100, separation * factor);
+            return outside(box, { x: direction[0] * length, y: direction[1] * length });
+          };
+          consider({ control1: vector(source, first), control2: vector(target, last) });
+        }
       }
     }
   }
   scene.routes.set(key, best);
+  scene.preferredRoutes.set(preferredKey, { controls: best, score: bestScore, width: label.width, height: label.height });
   if (scene.routes.size > 4096) scene.routes.delete(scene.routes.keys().next().value);
+  if (scene.preferredRoutes.size > 4096) scene.preferredRoutes.delete(scene.preferredRoutes.keys().next().value);
   return best;
-}
-
-function reservedLabel(label) {
-  // Reserve one full label from the start, so ordinary typing does not move it.
-  const twoLines = lineHeight * 2;
-  return { ...label, width: labelMaxWidth, height: Math.max(twoLines, Math.ceil((label.height - labelPaddingY * 2) / twoLines) * twoLines) + labelPaddingY * 2 };
 }
 
 const noRelationships = [];
@@ -359,14 +437,12 @@ function routingBatch(scene, relationships, measure) {
   for (const relationship of relationships) {
     if (!scene.boxes[relationship.sourceId] || !scene.boxes[relationship.targetId]) continue;
     const label = labelGeometry(relationship.text, { x: 0, y: 0 }, measure);
-    const reservation = reservedLabel(label);
-    const controls = routeControls(relationship, scene, reservation, edges, labels, signature.join('.'));
+    const controls = routeControls(relationship, scene, label, edges, labels, signature.join('.'));
     const geometry = buildGeometry(relationship, scene.boxes, label, controls);
     geometries.set(relationship.id, { relationship, geometry });
     for (const segment of edgeSegments(geometry, relationship.id)) edges.insert(segment);
-    const reserved = buildGeometry(relationship, scene.boxes, reservation, controls).label;
-    labels.insert({ bounds: expand(reserved, 6) });
-    signature = extendSignature(signature, `${relationship.id}:${geometry.path}:${reservation.width},${reservation.height}`);
+    if (relationship.text) labels.insert({ bounds: expand(geometry.label, 6) });
+    signature = extendSignature(signature, `${relationship.id}:${geometry.path}:${relationship.text ? `${label.width},${label.height}` : ''}`);
   }
   const batch = { edges, labels, geometries, prefix: signature.join('.') };
   measures.set(measure, batch);
@@ -389,7 +465,7 @@ export function relationshipGeometry(relationship, boxes, measure = fallbackMeas
     if (previous.sourceId === relationship.sourceId && previous.targetId === relationship.targetId && previous.text === relationship.text && samePoint(previous.control1, relationship.control1) && samePoint(previous.control2, relationship.control2)) return found.geometry;
     batch = routingBatch(scene, context.relationships.filter(item => item.id !== relationship.id), measure);
   }
-  const controls = routeControls(relationship, scene, reservedLabel(label), batch.edges, batch.labels, batch.prefix);
+  const controls = routeControls(relationship, scene, label, batch.edges, batch.labels, batch.prefix);
   return buildGeometry(relationship, boxes, label, controls);
 }
 

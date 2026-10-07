@@ -13,19 +13,20 @@ const perimeter = (point, rect) => {
   assert.ok(inside && edge, 'endpoint must lie on the rectangle perimeter');
 };
 
-test('same-row relationships bow above nodes and terminate at node borders', () => {
+test('same-row relationships take the clear straight corridor between facing borders', () => {
   const boxes = { a: box('a', 0, 100), b: box('b', 300, 100) };
   const result = relationshipGeometry(relation, boxes, measure);
   perimeter(result.start, boxes.a); perimeter(result.end, boxes.b);
-  assert.ok(result.c1.y < boxes.a.y && result.c2.y < boxes.b.y);
-  assert.ok(result.label.y + result.label.height / 2 < boxes.a.y);
+  close(result.start.x, 100); close(result.end.x, 300);
+  for (const point of [result.start, result.c1, result.c2, result.end]) close(point.y, 120);
   assert.ok(result.path.startsWith('M ') && result.path.includes(' C '));
 });
 
-test('same-column relationships bow right and custom controls choose the corresponding border', () => {
+test('same-column relationships join bottom to top while custom controls retain their chosen borders', () => {
   const boxes = { a: box('a', 0, 0), b: box('b', 0, 200) };
   const result = relationshipGeometry(relation, boxes);
-  assert.ok(result.c1.x > 100 && result.c2.x > 100);
+  close(result.start.y, 40); close(result.end.y, 200);
+  for (const point of [result.start, result.c1, result.c2, result.end]) close(point.x, 50);
   const custom = relationshipGeometry({ ...relation, control1: { x: -180, y: 0 }, control2: { x: 0, y: 160 } }, boxes);
   close(custom.start.x, 0); close(custom.start.y, 20);
   close(custom.end.x, 50); close(custom.end.y, 240);
@@ -49,10 +50,10 @@ test('default labels clear their endpoints even with nearby nodes and long text'
   const text = '这段联系文字需要保持完整并且不能被节点遮盖\nThe relationship remains outside both endpoints';
   const columns = { a: box('a', 0, 0, 260), b: box('b', 0, 60, 260) };
   const beside = relationshipGeometry({ ...relation, text }, columns, measure);
-  assert.ok(beside.label.x >= 260 + 16 - 1e-7);
+  assertClearNodes(beside, columns);
   const rows = { a: box('a', 0, 0, 260), b: box('b', 348, 0, 260) };
   const above = relationshipGeometry({ ...relation, text: text.repeat(4) }, rows, measure);
-  assert.ok(above.label.y + above.label.height <= -16 + 1e-7);
+  assertClearNodes(above, rows);
 });
 
 test('custom controls travel with their respective endpoint after layout changes', () => {
@@ -188,8 +189,9 @@ test('existing relationship curves and captions influence new automatic routes',
   assert.notEqual(after.path, relationshipGeometry(next, boxes).path, 'prior relationships must participate in routing');
 });
 
-test('one- and two-line typing preserve automatic controls while the label grows', () => {
+test('one- and two-line typing preserve the direct route while the caption fits its corridor', () => {
   const doc = treeFixture(), layout = layoutTree(doc);
+  layout.boxes.beta.y += 100; layout.boxes.gamma.y += 100;
   const base = { ...doc.relationships[0], text: '' };
   let path;
   for (const text of ['', '联系', 'Relationship', '联系\nRelationship']) {
