@@ -89,7 +89,7 @@ const editBesideImage = async (index, side) => {
       return above ? { start: neighbor?.getBoundingClientRect().bottom ?? outer.top, end: picture.top }
         : { start: picture.bottom, end: neighbor?.getBoundingClientRect().top ?? outer.bottom };
     }, side === 'above' || side === 'upper-left');
-    assert.ok(gap.end - gap.start > 2, '只在实际存在的图片上下空隙中双击');
+    assert.ok(gap.end > gap.start, '只在实际存在的图片上下空隙中双击');
     y = (gap.start + gap.end) / 2;
     if (side === 'above' || side === 'below') x = pictureBounds.x + pictureBounds.width / 2;
   }

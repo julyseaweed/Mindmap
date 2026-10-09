@@ -3,7 +3,7 @@ import { wrapText } from './text-wrap.mjs';
 export const FORMAT = 'inkmap';
 const nodeStyle = {
   fontSize: 14, lineHeight: 21, borderWidth: 1, paddingX: 5, paddingY: 2,
-  contentGap: 4, minWidth: 100, rootMinWidth: 152, maxAutoWidth: 260, maxWidth: 1600,
+  contentGap: 2, minWidth: 100, rootMinWidth: 152, maxAutoWidth: 260, maxWidth: 1600,
 };
 // The layout, editor, image handles and print view share these dimensions.
 export const NODE_STYLE = Object.freeze({
