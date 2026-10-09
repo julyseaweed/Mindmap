@@ -292,10 +292,10 @@ test('mixed content layout wraps blocks separately and reserves only the active 
   assert.deepEqual(box.content.map(block => block.kind), ['text', 'image', 'text', 'image', 'text']);
   assert.deepEqual(box.content.filter(block => block.kind === 'text').map(block => block.lines), [['Above'], ['Below'], []]);
   assert.equal(box.textHeight, 42);
-  assert.equal(box.height, 42 + 60 + 40 + 3 * 8 + 6);
+  assert.equal(box.height, 42 + 60 + 40 + 3 * 4 + 6);
   const editing = layoutTree(doc, undefined, { nodeId: 'root', segment: 2 }).boxes.root;
   assert.equal(editing.content[4].height, 21);
-  assert.equal(editing.height, box.height + 21 + 8);
+  assert.equal(editing.height, box.height + 21 + 4);
   assert.equal(layoutTree(doc, undefined, { nodeId: 'other', segment: 2 }).boxes.root.height, box.height);
   assert.deepEqual(doc, before);
 });
@@ -364,11 +364,11 @@ test('images impose column minimum width and stack below text without adding a b
   assert.equal(first.width, 332);
   assert.equal(first.textHeight, 0);
   assert.deepEqual(first.lines, []);
-  assert.equal(first.height, 150 + 40 + 8 + 6);
+  assert.equal(first.height, 150 + 40 + 4 + 6);
   assert.deepEqual(first.images, [{ id: 'first', width: 320, height: 150 }, { id: 'second', width: 180, height: 40 }]);
   assert.equal(layout.boxes.connect.width, 332);
   assert.equal(layout.boxes.keep.width, 332);
-  assert.equal(layout.boxes.connect.height, 21 + 8 + 80 + 6);
+  assert.equal(layout.boxes.connect.height, 21 + 4 + 80 + 6);
   assert.equal(doc.nodes.capture.images[0].width, 320);
   const empty = createDocument();
   empty.nodes.root.text = '';
