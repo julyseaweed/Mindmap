@@ -1170,7 +1170,7 @@ export default function App() {
         <span className="divider optional"/>
         <IconButton icon={ListTree} label="显示大纲" active={outline} disabled={!doc && !outline} onClick={() => { finishEdit(); setOutline(!outline); if (!outline) setLibraryOpen(false); }}/>
         <IconButton icon={Search} label="查找节点 (Ctrl + F)" active={searchOpen} disabled={!doc} onClick={() => { finishEdit(); setSearchOpen(!searchOpen); }} className="optional"/>
-        <button className="copy-button" disabled={!doc} onClick={() => void copy()} title="复制 Mermaid 代码块 (Ctrl + Shift + C)"><Copy size={15} strokeWidth={1.5}/><span>复制到 Obsidian</span><span className="compact-copy">复制</span></button>
+        <button className="copy-button" disabled={!doc} onClick={() => void copy()} title="复制 Mermaid 代码块 (Ctrl + Shift + C)"><Copy size={15} strokeWidth={1.25}/><span>复制到 Obsidian</span><span className="compact-copy">复制</span></button>
       </div>
     </header>
 
