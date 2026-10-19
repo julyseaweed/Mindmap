@@ -190,9 +190,9 @@ try {
     const text = `${kind} 导出应包含刚粘贴的内容`;
     const before = await mockState();
     await armPaste(text);
+    await page.getByRole('button', { name: '文件菜单', exact: true }).click();
     if (kind === 'Obsidian') await page.getByRole('button', { name: '复制到 Obsidian', exact: true }).click();
     else {
-      await page.getByRole('button', { name: '文件菜单', exact: true }).click();
       await page.getByRole('button', { name: '导出为 Markdown', exact: true }).click();
     }
     await page.waitForTimeout(150);

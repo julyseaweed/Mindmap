@@ -76,12 +76,12 @@ kbd { font-family: var(--font-mono); color: var(--muted); font-size: 10px; font-
 .toolbar-actions { gap: 9px; flex-shrink: 0; }
 .history-buttons { gap: 1px; }
 .icon-button { padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; height: 32px; width: 32px; flex-shrink: 0; }
-.primary-button, .copy-button { border: 1px solid var(--ink); border-radius: 6px; padding: 10px 16px; display: inline-flex; align-items: center; justify-content: center; gap: 9px; font-size: 12px; font-weight: 500; white-space: nowrap; }
+.primary-button, .export-button { border: 1px solid var(--ink); border-radius: 6px; padding: 10px 16px; display: inline-flex; align-items: center; justify-content: center; gap: 9px; font-size: 12px; font-weight: 500; white-space: nowrap; }
 .primary-button { background: var(--ink); color: var(--on-ink); }
 .primary-button:hover { background: var(--primary-hover); }
-.copy-button { margin-left: 6px; height: 32px; padding: 6px 10px; gap: 7px; border-color: transparent; border-radius: 3px; background: transparent; color: var(--ink); box-shadow: inset 0 0 0 .5px currentColor; }
-.copy-button:hover:not(:disabled) { color: var(--ink-hover); }
-.compact-copy { display: none; }
+.export-button { margin-left: 6px; height: 32px; padding: 6px 10px; gap: 7px; border-color: transparent; border-radius: 3px; background: transparent; color: var(--ink); box-shadow: inset 0 0 0 .5px currentColor; }
+.export-button:hover:not(:disabled) { color: var(--ink-hover); }
+.compact-export { display: none; }
 .workspace { flex: 1; display: flex; overflow: hidden; min-height: 0; position: relative; }
 /* Only the world transform moves the map; focus must never scroll its controls. */
 .canvas { flex: 1; position: relative; overflow: clip; background: var(--paper); touch-action: none; user-select: none; min-width: 0; container-type: inline-size; container-name: canvas; }
@@ -193,9 +193,9 @@ kbd { font-family: var(--font-mono); color: var(--muted); font-size: 10px; font-
   .document-title, .title-input { font-size: 12px; }
   .document-title { max-width: 28vw; }
   .toolbar-actions .history-buttons { display: none; }
-  .copy-button > span:not(.compact-copy) { display: none; }
-  .copy-button .compact-copy { display: inline; }
-  .copy-button { gap: 6px; }
+  .export-button > span:not(.compact-export) { display: none; }
+  .export-button .compact-export { display: inline; }
+  .export-button { gap: 6px; }
   .shortcut-grid { grid-template-columns: 1fr; }
   .help-modal { padding: 22px; }
   .help-heading h2 { font-size: 20px; }

@@ -448,7 +448,6 @@ try {
   stage = 'PDF containing inline images';
   const pdf = path.join(home, '图文笔记.pdf');
   await app.evaluate(({ dialog }, target) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: target }); }, pdf);
-  await page.getByRole('button', { name: '文件菜单', exact: true }).click();
   await page.getByRole('button', { name: '导出为 PDF', exact: true }).click();
   await eventually(async () => fs.stat(pdf).then(info => info.size > 1000).catch(() => false), '图文PDF未生成', 30000);
   const bytes = await fs.readFile(pdf);

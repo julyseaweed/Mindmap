@@ -83,6 +83,7 @@ const switchFont = async font => {
 const mermaid = async () => {
   await app.evaluate(({ clipboard }) => { globalThis.__fontCopy = clipboard.writeText; clipboard.writeText = text => { globalThis.__fontText = text; }; });
   try {
+    await page.getByRole('button', { name: '文件菜单', exact: true }).click();
     await page.getByRole('button', { name: '复制到 Obsidian', exact: true }).click();
     return await app.evaluate(() => globalThis.__fontText);
   } finally {
@@ -216,7 +217,6 @@ try {
     };
   }, pdf);
   await page.emulateMedia({ media: 'print' });
-  await page.getByRole('button', { name: '文件菜单', exact: true }).click();
   await page.getByRole('button', { name: '导出为 PDF', exact: true }).click();
   await eventually(async () => fs.stat(pdf).then(info => info.size > 1000).catch(() => false), 'NeverMind PDF 未生成', 30000);
   await eventually(async () => await page.locator('#pdf-export').count() === 0, 'PDF 暂存未清理');

@@ -228,7 +228,8 @@ try {
     ipcMain.removeHandler('clipboard:copy');
     ipcMain.handle('clipboard:copy', (_event, text) => { globalThis.__copiedMermaid = text; });
   });
-  await page.locator('.copy-button').click();
+  await page.getByRole('button', { name: '文件菜单', exact: true }).click();
+  await page.getByRole('button', { name: '复制到 Obsidian', exact: true }).click();
   const copied = await eventually(() => app.evaluate(() => globalThis.__copiedMermaid), '复制到 Obsidian 未生成 Mermaid');
   assert.match(copied, /^```mermaid\n/);
   assert.match(copied, /flowchart LR/);

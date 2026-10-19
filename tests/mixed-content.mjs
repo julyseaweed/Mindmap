@@ -358,7 +358,6 @@ try {
     };
   }, pdf);
   await page.emulateMedia({ media: 'print' });
-  await page.getByRole('button', { name: '文件菜单', exact: true }).click();
   await page.getByRole('button', { name: '导出为 PDF', exact: true }).click();
   await eventually(() => fs.stat(pdf).then(info => info.size > 1000).catch(() => false), 'PDF 未生成', 30000);
   await eventually(async () => await page.locator('#pdf-export, .app.busy').count() === 0, 'PDF 导出没有清理');

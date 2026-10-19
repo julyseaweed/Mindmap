@@ -1170,7 +1170,7 @@ export default function App() {
         <span className="divider optional"/>
         <IconButton icon={ListTree} label="显示大纲" active={outline} disabled={!doc && !outline} onClick={() => { finishEdit(); setOutline(!outline); if (!outline) setLibraryOpen(false); }}/>
         <IconButton icon={Search} label="查找节点 (Ctrl + F)" active={searchOpen} disabled={!doc} onClick={() => { finishEdit(); setSearchOpen(!searchOpen); }} className="optional"/>
-        <button className="copy-button" disabled={!doc} onClick={() => void copy()} title="复制 Mermaid 代码块 (Ctrl + Shift + C)"><Copy size={15} strokeWidth={1}/><span>复制到 Obsidian</span><span className="compact-copy">复制</span></button>
+        <button className="export-button" aria-label="导出为 PDF" disabled={!doc || fontBusy} onClick={() => void exportPdf()} title="导出为 PDF"><Download size={15} strokeWidth={1}/><span>导出为 PDF</span><span className="compact-export" aria-hidden="true">PDF</span></button>
       </div>
     </header>
 
@@ -1329,7 +1329,7 @@ export default function App() {
       <button disabled={!doc} onClick={() => void fileAction('save-as')}><Save size={16}/><span>另存为…</span><kbd>Ctrl + Shift + S</kbd></button>
       <div className="menu-separator"/>
       <button disabled={!doc} onClick={() => void exportFile()}><Download size={16}/><span>导出为 Markdown</span></button>
-      <button disabled={!doc || fontBusy} onClick={() => void exportPdf()}><Download size={16}/><span>导出为 PDF</span></button>
+      <button aria-label="复制到 Obsidian" disabled={!doc} onClick={() => void copy()} title="复制 Mermaid 代码块 (Ctrl + Shift + C)"><Copy size={16}/><span>复制到 Obsidian</span><kbd>Ctrl + Shift + C</kbd></button>
       <button onClick={() => { setMenu(false); void api?.reveal(); }}><Folder size={16}/><span>在文件夹中显示</span></button>
       <button onClick={() => { setMenu(false); finishEdit(); setHelp(true); }}><Keyboard size={16}/><span>快捷键</span></button>
     </div>}

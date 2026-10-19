@@ -242,7 +242,6 @@ try {
     }, pdf);
     await page.emulateMedia({ media: 'print' });
     try {
-      await page.getByRole('button', { name: '文件菜单', exact: true }).click();
       await page.getByRole('button', { name: '导出为 PDF', exact: true }).click();
       await eventually(() => fs.stat(pdf).then(stat => stat.size > 1000).catch(() => false), 'PDF 未写入隔离测试目录', 30000);
       await eventually(async () => await page.locator('#pdf-export').count() === 0, 'PDF 暂存未清除');

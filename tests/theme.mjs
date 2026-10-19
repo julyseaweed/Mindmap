@@ -102,6 +102,7 @@ const copy = async () => {
     clipboard.writeText = text => { globalThis.__themeCopiedText = text; };
   });
   try {
+    await page.getByRole('button', { name: '文件菜单', exact: true }).click();
     await page.getByRole('button', { name: '复制到 Obsidian', exact: true }).click();
     await eventually(async () => (await app.evaluate(() => globalThis.__themeCopiedText)).includes('flowchart LR'), 'Mermaid未复制');
     assert.equal(await page.locator('.app-error, .toast').count(), 0);

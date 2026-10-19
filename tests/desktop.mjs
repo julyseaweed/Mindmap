@@ -179,6 +179,7 @@ try {
   });
   let mermaid;
   try {
+    await page.getByRole('button', { name: '文件菜单', exact: true }).click();
     await page.getByRole('button', { name: '复制到 Obsidian', exact: true }).click();
     mermaid = await app.evaluate(() => globalThis.__desktopCopiedText);
   } finally {

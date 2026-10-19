@@ -85,7 +85,6 @@ const configure = (mode, target) => app.evaluate((_, config) => {
   globalThis.__pdfTest.target = config.target;
 }, { mode, target });
 const exportPdf = async () => {
-  await page.getByRole('button', { name: '文件菜单', exact: true }).click();
   await page.getByRole('button', { name: '导出为 PDF', exact: true }).click();
 };
 const cleaned = () => eventually(async () => await page.locator('#pdf-export').count() === 0 && await page.locator('.app.busy').count() === 0, '导出后的暂存画布没有清理');
