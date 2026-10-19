@@ -79,7 +79,7 @@ kbd { font-family: var(--font-mono); color: var(--muted); font-size: 10px; font-
 .primary-button, .copy-button { border: 1px solid var(--ink); border-radius: 6px; padding: 10px 16px; display: inline-flex; align-items: center; justify-content: center; gap: 9px; font-size: 12px; font-weight: 500; white-space: nowrap; }
 .primary-button { background: var(--ink); color: var(--on-ink); }
 .primary-button:hover { background: var(--primary-hover); }
-.copy-button { margin-left: 6px; height: 36px; background: transparent; color: var(--ink); }
+.copy-button { margin-left: 6px; height: 32px; padding: 6px 10px; gap: 7px; border-radius: 3px; background: transparent; color: var(--ink); }
 .copy-button:hover:not(:disabled) { color: var(--ink-hover); border-color: currentColor; }
 .compact-copy { display: none; }
 .workspace { flex: 1; display: flex; overflow: hidden; min-height: 0; position: relative; }
@@ -182,7 +182,6 @@ kbd { font-family: var(--font-mono); color: var(--muted); font-size: 10px; font-
   .optional { display: none; }
   .file-section { gap: 10px; }
   .document-title { max-width: 26vw; }
-  .copy-button { padding: 9px 10px; }
   .outline-panel { width: 260px; }
   .panel-heading { padding-left: 15px; }
 }
